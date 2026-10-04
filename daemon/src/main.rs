@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    println!("ks-fit {}", env!("CARGO_PKG_VERSION"));
 }
