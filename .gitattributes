@@ -8,7 +8,16 @@
 /.husky/pre-commit linguist-generated
 /.prettierignore linguist-generated
 /.projen/** linguist-generated
+/Cargo.lock linguist-generated
+/Cargo.toml linguist-generated
 /CODEOWNERS linguist-generated
+/daemon/.gitattributes linguist-generated
+/daemon/.gitignore linguist-generated
+/daemon/.projen/** linguist-generated
+/daemon/.projen/deps.json linguist-generated
+/daemon/.projen/files.json linguist-generated
+/daemon/.projen/tasks.json linguist-generated
+/daemon/Cargo.toml linguist-generated
 /license linguist-generated
 /lint-staged.config.js linguist-generated
 /package.json linguist-generated
@@ -16,4 +25,6 @@
 /pnpm-workspace.yaml linguist-generated
 /prettier.config.js linguist-generated
 /renovate.json5 linguist-generated
+/rust-toolchain.toml linguist-generated
+/rustfmt.toml linguist-generated
 readme text=auto linguist-language=Markdown

@@ -1,5 +1,7 @@
 import { Project } from '@langri-sha/projen-project'
 
+const version = '0.1.0'
+
 const project = new Project({
   name: 'omarchy-ks-fit',
   package: {
@@ -21,14 +23,75 @@ const project = new Project({
     entrypoint: '',
     devDeps: ['@langri-sha/lint-staged@0.9.9', '@langri-sha/prettier@0.4.10'],
   },
+  cargo: {
+    workspace: {
+      package: {
+        authors: ['Filip Dupanović <filip.dupanovic@gmail.com>'],
+        license: 'MIT',
+        publish: false,
+        repository: 'https://github.com/langri-sha/omarchy-ks-fit',
+        'rust-version': '1.89',
+        version,
+      },
+      dependencies: {
+        anyhow: '1.0.104',
+        bluer: { version: '0.17.4', features: ['bluetoothd'] },
+        'futures-util': '0.3.34',
+        jiff: '0.2.37',
+        log: '0.4.34',
+        rusqlite: { version: '0.40.2', features: ['bundled'] },
+        serde: { version: '1.0.229', features: ['derive'] },
+        serde_json: '1.0.151',
+        thiserror: '2.0.21',
+        tokio: {
+          version: '1.53.2',
+          features: [
+            'io-std',
+            'io-util',
+            'macros',
+            'rt',
+            'signal',
+            'sync',
+            'time',
+          ],
+        },
+      },
+      lints: {
+        rust: {
+          unsafe_code: 'forbid',
+        },
+      },
+    },
+    profile: {
+      release: {
+        'codegen-units': 1,
+        lto: true,
+        strip: true,
+      },
+    },
+    toolchain: {
+      components: ['clippy', 'rustfmt'],
+    },
+  },
   codeowners: {
     '*': '@langri-sha',
   },
-  editorConfig: {},
+  editorConfig: {
+    // Listed first so the preset's defaults land here rather than after the
+    // Rust section, where they would override its indent_size.
+    '*': {},
+    '*.rs': {
+      indent_size: 4,
+    },
+  },
   husky: {
     'pre-commit': 'lint-staged',
   },
-  lintStaged: {},
+  lintStaged: {
+    config: {
+      '*.rs': 'rustfmt',
+    },
+  },
   lintSynthesized: {},
   pnpmWorkspace: {
     minimumReleaseAgeExclude: ['@langri-sha/*'],
@@ -72,12 +135,43 @@ const project = new Project({
   },
 })
 
+project.addSubproject({
+  name: 'ks-fit',
+  outdir: 'daemon',
+  cargo: {
+    package: {
+      description:
+        'Drives a KingSmith WalkingPad over Bluetooth LE and records the walks',
+    },
+    dependencies: {
+      anyhow: { workspace: true },
+      bluer: { workspace: true },
+      'futures-util': { workspace: true },
+      jiff: { workspace: true },
+      log: { workspace: true },
+      rusqlite: { workspace: true },
+      serde: { workspace: true },
+      serde_json: { workspace: true },
+      thiserror: { workspace: true },
+      tokio: { workspace: true },
+    },
+    'dev-dependencies': {
+      tokio: { workspace: true, features: ['test-util'] },
+    },
+    lints: {
+      workspace: true,
+    },
+  },
+})
+
 project.package?.addField('private', true)
 project.package?.addField('packageManager', 'pnpm@12.8.2')
 project.package?.addEngine('pnpm', '>= 11.0.0')
 
 project.package?.setScript('format', 'prettier --write .')
 project.package?.setScript('format:check', 'prettier --check .')
+
+project.annotateGenerated('/Cargo.lock')
 
 project.gitattributes.addAttributes(
   'readme',

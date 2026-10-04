@@ -23,6 +23,10 @@ node_modules/
 !/package.json
 !/prettier.config.js
 !/.prettierignore
+!/Cargo.toml
+!/rust-toolchain.toml
+!/rustfmt.toml
+/target/
 !/CODEOWNERS
 !/.editorconfig
 !/license

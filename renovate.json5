@@ -77,6 +77,19 @@
     },
     {
       customType: 'regex',
+      datasourceTemplate: 'crate',
+      managerFilePatterns: ['/\\.?projen.*.(js|cjs|mjs|ts|mts|cts)$/'],
+      matchStringsStrategy: 'recursive',
+      matchStrings: [
+        "(?<depType>dependencies|dev-dependencies|build-dependencies)'?:\\s*\\{(?:[^{}]|\\{[^{}]*\\})*\\}",
+        '\\{(?:[^{}]|\\{[^{}]*\\})*\\}',
+        "'?(?<depName>[\\w-]+)'?:\\s*(?:'[^']*'|\\{[^{}]*\\})",
+        "^[^{]*(?:\\{[^{}]*?package:\\s*'(?<packageName>[^']+)')?[\\s\\S]*",
+        "(?:^'?[\\w-]+'?:\\s*|version:\\s*)'(?<currentValue>[^']+)'",
+      ],
+    },
+    {
+      customType: 'regex',
       datasourceTemplate: 'npm',
       managerFilePatterns: ['/(^|/)\\.?projenrc\\.(js|cjs|mjs|ts|mts|cts)$/'],
       matchStrings: [
