@@ -151,7 +151,7 @@ QtObject {
   function panelOpened() {
     openPanels++
     if (helper === "missing" || helper === "outdated") retryHelper()
-    if (openPanels === 1) wake()
+    wake()
     refreshStats()
   }
 
