@@ -69,6 +69,9 @@ pub struct Tracker {
     /// A frame whose time counter dropped, waiting for the next frame from
     /// the same pad to confirm a reset.
     unconfirmed: Option<(String, Counters)>,
+    /// A frame no pad could have reached from the baseline, held to see
+    /// whether the next frame from the same pad carries on from it.
+    implausible: Option<(String, Baseline)>,
     today: Today,
     day: Range<Timestamp>,
 }
@@ -97,6 +100,7 @@ impl Tracker {
             session: None,
             last,
             unconfirmed: None,
+            implausible: None,
             today,
             day,
         })
@@ -151,11 +155,30 @@ impl Tracker {
             .take()
             .filter(|(pad, _)| pad == device)
             .map(|(_, reading)| reading);
-        let baseline = self.store.baseline(device)?;
-        let Some(delta) = credit(device, baseline, unconfirmed, reading, now) else {
-            log::info!("{device}: the time counter went back; a reset needs one more frame");
-            self.unconfirmed = Some((device.to_owned(), reading));
-            return Ok(());
+        let implausible = self
+            .implausible
+            .take()
+            .filter(|(pad, _)| pad == device)
+            .map(|(_, held)| held);
+        let stored = self.store.baseline(device)?;
+        let (delta, baseline) = match credit(stored, unconfirmed, implausible, reading, now) {
+            Credit::Delta(delta, baseline) => (delta, baseline),
+            Credit::Unconfirmed => {
+                log::info!("{device}: the time counter went back; a reset needs one more frame");
+                self.unconfirmed = Some((device.to_owned(), reading));
+                return Ok(());
+            }
+            Credit::Implausible(baseline) => {
+                let elapsed = now.duration_since(baseline.seen_at);
+                log::warn!("{device}: ignoring counters of {reading:?} within {elapsed:#}");
+                let held = Baseline {
+                    counters: reading,
+                    seen_at: now,
+                };
+                self.implausible = Some((device.to_owned(), held));
+                self.store.set_baseline(device, baseline.counters, now)?;
+                return Ok(());
+            }
         };
         let untimed = untimed(delta, baseline, now);
         let closing = if untimed {
@@ -229,6 +252,7 @@ impl Tracker {
     pub fn on_link_lost(&mut self) -> Result<()> {
         self.running = false;
         self.unconfirmed = None;
+        self.implausible = None;
         self.close()
     }
 
@@ -345,26 +369,46 @@ fn clamp_weight(kg: f64) -> f64 {
     }
 }
 
-/// What to credit for `reading`: nothing on a device's first frame or when
-/// no pad could have advanced that far since `baseline`, and `None` while a
-/// reset is unconfirmed.
+/// What a frame's reading is worth.
+enum Credit {
+    /// The counters advanced by this much since the reading they are counted
+    /// from, which is `None` on a device's first frame.
+    Delta(Counters, Option<Baseline>),
+    /// The time counter went back; a reset needs one more frame.
+    Unconfirmed,
+    /// No pad could have advanced that far since the baseline, which stays.
+    Implausible(Baseline),
+}
+
+/// What to credit for `reading`: nothing on a device's first frame, the
+/// advance from the baseline when it is plausible, else the advance from the
+/// `implausible` reading before it when this one carries on from that, which
+/// re-bases without credit for the jump.
 fn credit(
-    device: &str,
     baseline: Option<Baseline>,
     unconfirmed: Option<Counters>,
+    implausible: Option<Baseline>,
     reading: Counters,
     now: Timestamp,
-) -> Option<Counters> {
+) -> Credit {
     let Some(baseline) = baseline else {
-        return Some(Counters::default());
+        return Credit::Delta(Counters::default(), None);
     };
-    let delta = delta(baseline.counters, unconfirmed, reading)?;
-    let elapsed = now.duration_since(baseline.seen_at);
-    if plausible(delta, elapsed) {
-        Some(delta)
-    } else {
-        log::warn!("{device}: ignoring a counter advance of {delta:?} within {elapsed:#}");
-        Some(Counters::default())
+    let advance = delta(baseline.counters, unconfirmed, reading);
+    if let Some(advance) = advance
+        && plausible(advance, now.duration_since(baseline.seen_at))
+    {
+        return Credit::Delta(advance, Some(baseline));
+    }
+    if let Some(held) = implausible
+        && let Some(onward) = delta(held.counters, None, reading)
+        && plausible(onward, now.duration_since(held.seen_at))
+    {
+        return Credit::Delta(onward, Some(held));
+    }
+    match advance {
+        Some(_) => Credit::Implausible(baseline),
+        None => Credit::Unconfirmed,
     }
 }
 
@@ -658,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_spike_credits_nothing_and_the_real_frames_re_base() {
+    fn a_corrupt_spike_credits_nothing_and_the_walk_carries_on_from_before_it() {
         let mut tracker = tracker_at(at("10:00:00"));
         feed(
             &mut tracker,
@@ -670,7 +714,70 @@ mod tests {
                 (at("10:00:04"), walking(1_004, 80, 1_508)),
             ],
         );
-        assert_eq!(integers(tracker.today().activity), (1, 2, 0));
+        assert_eq!(integers(tracker.today().activity), (4, 8, 0));
+    }
+
+    #[test]
+    fn an_implausible_frame_keeps_the_counters_and_moves_only_the_seen_at() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), walking(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(9_000, 80, 1_502)),
+            ],
+        );
+        assert_eq!(
+            tracker.store().baseline(PAD).unwrap(),
+            Some(Baseline {
+                counters: walking(1_000, 80, 1_500).counters(),
+                seen_at: at("10:00:01")
+            })
+        );
+    }
+
+    #[test]
+    fn a_corrupt_frame_before_the_link_drops_is_not_credited_again_the_next_day() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), walking(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(9_000, 80, 1_502)),
+            ],
+        );
+        tracker.on_link_lost().unwrap();
+        feed(
+            &mut tracker,
+            &[
+                (local("2026-10-05T09:00:00"), walking(1_500, 120, 2_500)),
+                (local("2026-10-05T09:00:01"), walking(1_501, 120, 2_502)),
+            ],
+        );
+        assert_eq!(tracker.today().date, jiff::civil::date(2026, 10, 5));
+        assert_eq!(integers(tracker.today().activity), (501, 1_002, 400));
+    }
+
+    #[test]
+    fn a_reset_too_large_for_the_wall_clock_re_bases_once_the_next_frame_follows_it() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(49, 4, 98)),
+                (at("10:00:02"), walking(50, 4, 100)),
+            ],
+        );
+        assert_eq!(tracker.session(), None);
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:03"), walking(51, 4, 102)),
+                (at("10:00:04"), walking(52, 5, 104)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (2, 4, 10));
     }
 
     #[test]
