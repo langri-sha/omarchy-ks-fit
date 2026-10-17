@@ -138,7 +138,10 @@ struct Sim {
     link: Option<LinkId>,
     links: u64,
     last_write: Option<Instant>,
+    /// Kept only while a [`Control`] can ask for it: `--simulate` drops its
+    /// own at once and would otherwise grow the log without bound.
     writes: Vec<Write>,
+    hooked: bool,
 }
 
 struct Scan {
@@ -174,6 +177,7 @@ impl Sim {
             links: 0,
             last_write: None,
             writes: Vec::new(),
+            hooked: true,
         }
     }
 
@@ -183,7 +187,6 @@ impl Sim {
         mut hooks: mpsc::UnboundedReceiver<Hook>,
     ) {
         self.emit(RadioEvent::Adapter(AdapterState::On));
-        let mut hooked = true;
         loop {
             let wake = self.next_wake();
             tokio::select! {
@@ -193,9 +196,9 @@ impl Sim {
                     Some(call) => self.call(Instant::now(), call),
                     None => return,
                 },
-                hook = hooks.recv(), if hooked => match hook {
+                hook = hooks.recv(), if self.hooked => match hook {
                     Some(hook) => self.hook(Instant::now(), hook),
-                    None => hooked = false,
+                    None => self.unhook(),
                 },
                 () = sleep_until_some(wake) => self.wake(Instant::now()),
             }
@@ -248,6 +251,11 @@ impl Sim {
                 }
             }
         }
+    }
+
+    fn unhook(&mut self) {
+        self.hooked = false;
+        self.writes = Vec::new();
     }
 
     fn next_wake(&self) -> Option<Instant> {
@@ -347,11 +355,13 @@ impl Sim {
             .is_some_and(|last| now.saturating_duration_since(last) < MIN_GAP);
         self.last_write = Some(now);
         self.pad.advance(now);
-        self.writes.push(Write {
-            at: now,
-            frame: frame.clone(),
-            belt: Belt::from(self.pad.belt),
-        });
+        if self.hooked {
+            self.writes.push(Write {
+                at: now,
+                frame: frame.clone(),
+                belt: Belt::from(self.pad.belt),
+            });
+        }
         if too_soon {
             log::debug!("the pad drops a write that came too soon");
         } else if let Some(reply) = self.pad.receive(now, &frame) {
@@ -772,6 +782,24 @@ mod tests {
         pad.running();
         pad.firmware.remote(pad.now, 35);
         assert_eq!(pad.wait(secs(3)).speed_dkmh, 35);
+    }
+
+    #[test]
+    fn keeps_no_write_log_once_nobody_can_ask_for_it() {
+        let (events, mut received) = mpsc::unbounded_channel();
+        let mut sim = Sim::new(events);
+        sim.link = Some(LinkId(1));
+        sim.unhook();
+        let frame = Command::AskStats.encode();
+        sim.call(
+            Instant::now(),
+            Call::Write {
+                link: LinkId(1),
+                frame,
+            },
+        );
+        assert_eq!(sim.writes, []);
+        assert!(matches!(received.try_recv(), Ok(RadioEvent::Frame(_))));
     }
 
     async fn next(radio: &mut Radio) -> RadioEvent {
