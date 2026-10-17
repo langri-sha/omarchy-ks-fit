@@ -219,6 +219,17 @@ function sessionMark(state) {
   return last ? last.id + ':' + last.endedAt : ''
 }
 
+var stopFailureText = "KS Fit couldn't stop the belt — use the remote"
+
+// A stop the pad didn't carry out: someone may still be walking.
+function stopFailed(message) {
+  var m = message || {}
+  return (
+    m.code === 'stop-not-acknowledged' ||
+    (m.code === 'not-connected' && m.cmd === 'stop')
+  )
+}
+
 function demoBlockedText(demo) {
   return demo
     ? 'Demo mode starts once the belt stops'
