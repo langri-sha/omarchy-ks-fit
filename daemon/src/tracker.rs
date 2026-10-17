@@ -1,7 +1,7 @@
 //! Turns pad counters into recorded activity.
 
 use crate::calories;
-use crate::store::{Activity, Counters, Session, Store};
+use crate::store::{Activity, Baseline, Counters, Session, Store};
 use anyhow::Result;
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
@@ -17,6 +17,11 @@ const MAX_WEIGHT_KG: f64 = 300.0;
 const LIVE_S: u32 = 5;
 const IDLE_CLOSE: SignedDuration = SignedDuration::from_secs(10);
 const MERGE_WITHIN: SignedDuration = SignedDuration::from_secs(120);
+/// Bounds on a plausible advance of the counters, against frames that are
+/// corrupt yet pass the 8-bit checksum.
+const MAX_KMH: u64 = 8;
+const MAX_STEPS_PER_S: u64 = 4;
+const CLOCK_SLACK_S: i64 = 5;
 
 /// The pad state carried by one status frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,7 +138,7 @@ impl Tracker {
         self.roll_over(now)?;
         self.running = sample.running;
         let reading = sample.counters();
-        let delta = delta(self.store.baseline(device)?, reading);
+        let delta = credit(device, self.store.baseline(device)?, reading, now);
         let kcal = energy(delta, sample.speed_kmh(), self.weight_kg);
         let shares = shares(delta, kcal, now)?;
         let mut next = self.advance(delta, &shares, sample, now)?;
@@ -295,24 +300,46 @@ fn clamp_weight(kg: f64) -> f64 {
     }
 }
 
-/// What the counters advanced by since `baseline`: nothing on a device's
-/// first frame, and everything since zero when the pad has reset.
-fn delta(baseline: Option<Counters>, reading: Counters) -> Counters {
-    match baseline {
-        None => Counters::default(),
-        Some(base)
-            if reading.time_s < base.time_s
-                || reading.dist_10m < base.dist_10m
-                || reading.steps < base.steps =>
-        {
-            reading
-        }
-        Some(base) => Counters {
-            time_s: reading.time_s - base.time_s,
-            dist_10m: reading.dist_10m - base.dist_10m,
-            steps: reading.steps - base.steps,
-        },
+/// What to credit for `reading`: nothing on a device's first frame or when
+/// no pad could have advanced that far since `baseline`.
+fn credit(device: &str, baseline: Option<Baseline>, reading: Counters, now: Timestamp) -> Counters {
+    let Some(baseline) = baseline else {
+        return Counters::default();
+    };
+    let delta = delta(baseline.counters, reading);
+    let elapsed = now.duration_since(baseline.seen_at);
+    if plausible(delta, elapsed) {
+        delta
+    } else {
+        log::warn!("{device}: ignoring a counter advance of {delta:?} within {elapsed:#}");
+        Counters::default()
     }
+}
+
+/// What the counters advanced by since `base`, everything since zero when
+/// the pad has reset.
+fn delta(base: Counters, reading: Counters) -> Counters {
+    if reading.time_s < base.time_s
+        || reading.dist_10m < base.dist_10m
+        || reading.steps < base.steps
+    {
+        return reading;
+    }
+    Counters {
+        time_s: reading.time_s - base.time_s,
+        dist_10m: reading.dist_10m - base.dist_10m,
+        steps: reading.steps - base.steps,
+    }
+}
+
+/// Whether the belt could have moved by `delta` within `elapsed`. Distance
+/// and steps may run a second and a 10 m tick ahead of the time counter.
+fn plausible(delta: Counters, elapsed: SignedDuration) -> bool {
+    let time_s = u64::from(delta.time_s);
+    let metres = u64::from(delta.dist_10m) * 10;
+    i64::from(delta.time_s) <= elapsed.as_secs() + CLOCK_SLACK_S
+        && metres <= (time_s + 1) * MAX_KMH * 1_000 / 3_600 + 10
+        && u64::from(delta.steps) <= (time_s + 1) * MAX_STEPS_PER_S
 }
 
 /// Energy for `delta`, at the belt speed for a live delta and at the
@@ -468,7 +495,10 @@ mod tests {
         assert_eq!(minutes(&tracker, at("00:00")..at("23:59")), []);
         assert_eq!(
             tracker.store().baseline(PAD).unwrap(),
-            Some(walking(500, 40, 800).counters())
+            Some(Baseline {
+                counters: walking(500, 40, 800).counters(),
+                seen_at: at("10:00:00")
+            })
         );
     }
 
@@ -505,6 +535,76 @@ mod tests {
             ],
         );
         assert_eq!(integers(tracker.session().unwrap().activity), (4, 8, 10));
+    }
+
+    #[test]
+    fn an_advance_beyond_the_wall_clock_only_moves_the_baseline() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(0, 0, 0)),
+                (at("10:00:10"), walking(16, 1, 30)),
+            ],
+        );
+        assert_eq!(tracker.session(), None);
+        assert_eq!(tracker.today().activity, Activity::default());
+        feed(&mut tracker, &[(at("10:00:11"), walking(17, 1, 32))]);
+        assert_eq!(integers(tracker.today().activity), (1, 2, 0));
+    }
+
+    #[test]
+    fn distance_beyond_eight_kmh_credits_nothing() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(0, 0, 0)),
+                (at("10:01:00"), walking(60, 15, 100)),
+            ],
+        );
+        assert_eq!(tracker.session(), None);
+    }
+
+    #[test]
+    fn distance_up_to_eight_kmh_and_a_tick_is_credited() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(0, 0, 0)),
+                (at("10:01:00"), walking(60, 14, 100)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (60, 100, 140));
+    }
+
+    #[test]
+    fn more_than_four_steps_a_second_credits_nothing() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(0, 0, 0)),
+                (at("10:01:00"), walking(60, 5, 245)),
+            ],
+        );
+        assert_eq!(tracker.session(), None);
+        feed(&mut tracker, &[(at("10:02:00"), walking(120, 10, 489))]);
+        assert_eq!(integers(tracker.today().activity), (60, 244, 50));
+    }
+
+    #[test]
+    fn steps_and_a_distance_tick_may_lead_the_time_counter_by_a_second() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(10, 1, 20)),
+                (at("10:00:01"), walking(10, 2, 24)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (0, 4, 10));
     }
 
     #[test]

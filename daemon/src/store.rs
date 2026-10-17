@@ -136,6 +136,13 @@ pub struct Counters {
     pub steps: u32,
 }
 
+/// The counters a pad showed when it was last seen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Baseline {
+    pub counters: Counters,
+    pub seen_at: Timestamp,
+}
+
 /// Activity over some stretch of time.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Activity {
@@ -312,22 +319,30 @@ impl Store {
         Ok(())
     }
 
-    /// The counters last seen from the pad at `address`.
-    pub fn baseline(&self, address: &str) -> Result<Option<Counters>> {
-        let counters: Option<(Option<u32>, Option<u32>, Option<u32>)> = self
+    /// The counters last seen from the pad at `address`, and when.
+    pub fn baseline(&self, address: &str) -> Result<Option<Baseline>> {
+        let baseline = self
             .conn
             .query_row(
-                "SELECT pad_time, pad_dist, pad_steps FROM devices WHERE address = ?1",
+                "SELECT pad_time, pad_dist, pad_steps, seen_at FROM devices WHERE address = ?1",
                 [address],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    let seen_at: Option<i64> = row.get(3)?;
+                    let seen_at = seen_at.map(|second| timestamp(3, second)).transpose()?;
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, seen_at))
+                },
             )
             .optional()?;
-        Ok(counters.and_then(|(time_s, dist_10m, steps)| {
-            Some(Counters {
-                time_s: time_s?,
-                dist_10m: dist_10m?,
-                steps: steps?,
-            })
+        let Some((Some(time_s), Some(dist_10m), Some(steps), Some(seen_at))) = baseline else {
+            return Ok(None);
+        };
+        Ok(Some(Baseline {
+            counters: Counters {
+                time_s,
+                dist_10m,
+                steps,
+            },
+            seen_at,
         }))
     }
 
@@ -843,7 +858,13 @@ mod tests {
         store.remember_device("AA:BB:CC:DD:EE:01", None).unwrap();
         store.forget_device().unwrap();
         assert_eq!(store.remembered_device().unwrap(), None);
-        assert_eq!(store.baseline("AA:BB:CC:DD:EE:01").unwrap(), Some(counters));
+        assert_eq!(
+            store.baseline("AA:BB:CC:DD:EE:01").unwrap(),
+            Some(Baseline {
+                counters,
+                seen_at: at(1_000)
+            })
+        );
     }
 
     #[test]
@@ -862,8 +883,14 @@ mod tests {
         store.set_baseline("pad-1", first, at(1_000)).unwrap();
         store.set_baseline("pad-2", first, at(1_000)).unwrap();
         store.set_baseline("pad-2", second, at(1_001)).unwrap();
-        assert_eq!(store.baseline("pad-1").unwrap(), Some(first));
-        assert_eq!(store.baseline("pad-2").unwrap(), Some(second));
+        let seen = |counters, second| {
+            Some(Baseline {
+                counters,
+                seen_at: at(second),
+            })
+        };
+        assert_eq!(store.baseline("pad-1").unwrap(), seen(first, 1_000));
+        assert_eq!(store.baseline("pad-2").unwrap(), seen(second, 1_001));
         assert_eq!(store.baseline("pad-3").unwrap(), None);
     }
 
