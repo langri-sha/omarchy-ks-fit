@@ -1,0 +1,44 @@
+name: Cargo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cargo.yml'
+      - '**/*.rs'
+      - '**/Cargo.*'
+      - 'rust-toolchain.toml'
+      - 'rustfmt.toml'
+  pull_request:
+    paths:
+      - '.github/workflows/cargo.yml'
+      - '**/*.rs'
+      - '**/Cargo.*'
+      - 'rust-toolchain.toml'
+      - 'rustfmt.toml'
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # bluer links against libdbus.
+      - name: Install D-Bus headers
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libdbus-1-dev pkg-config
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
