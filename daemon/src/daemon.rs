@@ -300,13 +300,22 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Daemon<R, W> {
         let mut shutdown = pin!(shutdown);
         self.outbox.push(Message::hello(self.simulated));
         self.sync = true;
-        if let Ok(Some(event)) = time::timeout(FIRST_EVENT, self.radio.events().recv()).await {
-            self.on_radio(event);
+        tokio::select! {
+            first = time::timeout(FIRST_EVENT, self.radio.events().recv()) => {
+                if let Ok(Some(event)) = first {
+                    self.on_radio(event);
+                }
+            }
+            () = &mut shutdown => return Ok(()),
         }
         let mut tick = time::interval(TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let outcome = loop {
-            if let Err(error) = self.flush().await {
+            let flushed = tokio::select! {
+                flushed = self.flush() => flushed,
+                () = &mut shutdown => break Ok(()),
+            };
+            if let Err(error) = flushed {
                 log::info!("the shell stopped reading: {error}");
                 break Ok(());
             }
