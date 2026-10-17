@@ -22,6 +22,11 @@ QtObject {
   readonly property var settings: Model.layoutEntry(shell ? shell.barConfig : null, pluginId)
   readonly property real weightKg: Model.coerceNumber(settings.weightKg, 70, 20, 300)
   readonly property bool demo: Model.coerceBool(settings.demo, false)
+  // The mode the helper runs in, or starts in next. A `demo` flip reaches it
+  // only while the belt stands still: switching helpers would take the
+  // controls away from a pad someone is walking on.
+  property bool helperDemo: false
+  readonly property bool demoBlocked: demo !== helperDemo && exercising
 
   // After `omarchy plugin update` the kept service still runs the old QML.
   readonly property bool stale: !!manifest && !!manifest.version && manifest.version !== Version.version
@@ -52,7 +57,8 @@ QtObject {
   property int statsRequestId: 0
   readonly property var currentStats: statsRevision >= 0 ? statsFor(statsPeriod, statsOffset) : null
 
-  property string notice: ""
+  property string errorNotice: ""
+  readonly property string notice: demoBlocked ? Model.demoBlockedText(demo) : errorNotice
   // Open panels, at most one per monitor. Held by object so a panel that a hot
   // reload destroys can take itself out (Component.onDestruction).
   property var panels: []
@@ -161,7 +167,7 @@ QtObject {
   }
 
   function showNotice(text) {
-    notice = text
+    errorNotice = text
     noticeTimer.restart()
   }
 
@@ -301,7 +307,7 @@ QtObject {
   }
 
   readonly property Process helperProcess: Process {
-    command: [root.launcherPath].concat(root.demo ? ["--simulate"] : [])
+    command: [root.launcherPath].concat(root.helperDemo ? ["--simulate"] : [])
     stdinEnabled: true
     stdout: SplitParser {
       onRead: function(line) { root.handleLine(line) }
@@ -336,7 +342,7 @@ QtObject {
 
   readonly property Timer noticeTimer: Timer {
     interval: 6000
-    onTriggered: root.notice = ""
+    onTriggered: root.errorNotice = ""
   }
 
   readonly property Timer statsTimer: Timer {
@@ -348,8 +354,15 @@ QtObject {
 
   onWeightKgChanged: configure()
 
+  function applyDemo() {
+    if (demo === helperDemo || exercising) return
+    helperDemo = demo
+    if (helperProcess.running) restartHelper()
+  }
+
   // Injection fires this before the deferred start, while nothing runs yet.
-  onDemoChanged: if (helperProcess.running) restartHelper()
+  onDemoChanged: applyDemo()
+  onExercisingChanged: applyDemo()
 
   // The shell assigns shell and manifest right after createObject().
   Component.onCompleted: Qt.callLater(startHelper)

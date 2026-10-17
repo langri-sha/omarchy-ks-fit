@@ -200,6 +200,12 @@ function sessionMark(state) {
   return last ? last.id + ':' + last.endedAt : ''
 }
 
+function demoBlockedText(demo) {
+  return demo
+    ? 'Demo mode starts once the belt stops'
+    : 'Demo mode ends once the belt stops'
+}
+
 var errorTexts = {
   'not-connected': 'The pad is not connected',
   'bluetooth-off': 'Bluetooth is off',
