@@ -12,6 +12,8 @@ const POLL: Duration = Duration::from_secs(1);
 const WATCHDOG: Duration = Duration::from_secs(10);
 /// How old the newest status may be when `04 01` is written.
 const FRESH: Duration = Duration::from_secs(2);
+const PREFS_QUERIES: u8 = 3;
+const PREFS_RETRY: Duration = Duration::from_secs(3);
 const MODE_WAIT: Duration = Duration::from_secs(3);
 const MODE_SENDS: u8 = 2;
 const START_WAIT: Duration = Duration::from_secs(6);
@@ -129,7 +131,9 @@ pub struct Controller {
     heard: Instant,
     writable: Instant,
     poll: Instant,
-    prefs_due: bool,
+    /// When to ask for the prefs, until the pad answers or the queries run out.
+    prefs_at: Option<Instant>,
+    prefs_queries: u8,
     /// A status arrived after our latest status request.
     answered: bool,
     /// Our latest status request was a poll.
@@ -208,7 +212,8 @@ impl Controller {
             heard: now,
             writable: now,
             poll: now,
-            prefs_due: false,
+            prefs_at: None,
+            prefs_queries: 0,
             answered: false,
             polled: false,
             start_sent: None,
@@ -226,7 +231,7 @@ impl Controller {
             return actions;
         }
         if self.status.is_none() {
-            self.prefs_due = true;
+            self.prefs_at = Some(now);
         }
         let poll_reply = self.polled && !self.answered;
         self.answered = true;
@@ -251,6 +256,7 @@ impl Controller {
 
     pub fn on_prefs(&mut self, prefs: &Prefs) -> Vec<Action> {
         let mut actions = Vec::new();
+        self.prefs_at = None;
         self.imperial = prefs.imperial;
         if prefs.imperial {
             log::warn!(
@@ -290,10 +296,12 @@ impl Controller {
         if self.dead {
             return None;
         }
-        let write = if self.op_write().is_some() || self.prefs_due {
+        let write = if self.op_write().is_some() {
             self.writable
         } else {
-            self.writable.max(self.poll)
+            let poll = self.writable.max(self.poll);
+            self.prefs_at
+                .map_or(poll, |at| poll.min(self.writable.max(at)))
         };
         let op = match &self.op {
             Some(Op::Start {
@@ -681,11 +689,8 @@ impl Controller {
         }
         let command = match self.op_write() {
             Some((command, true)) => command,
-            _ if self.prefs_due => {
-                self.prefs_due = false;
-                Command::QueryPrefs
-            }
             _ if now >= self.poll => Command::AskStats,
+            _ if self.prefs_at.is_some_and(|at| now >= at) => Command::QueryPrefs,
             Some((command, false)) => command,
             None => return,
         };
@@ -712,6 +717,10 @@ impl Controller {
         }
         match command {
             Command::AskStats => self.poll = now + POLL,
+            Command::QueryPrefs => {
+                self.prefs_queries += 1;
+                self.prefs_at = (self.prefs_queries < PREFS_QUERIES).then(|| now + PREFS_RETRY);
+            }
             Command::StartBelt => self.start_sent = Some(now),
             _ => {}
         }
@@ -930,7 +939,10 @@ mod tests {
                 now,
                 pad,
                 obeys,
-                prefs: None,
+                prefs: Some(Prefs {
+                    max_dkmh: 60,
+                    imperial: false,
+                }),
                 log: Vec::new(),
             };
             let actions = bench.controller.on_tick(now);
@@ -1073,17 +1085,47 @@ mod tests {
         assert_eq!(bench.commands(), []);
     }
 
-    #[test]
-    fn queries_prefs_once_after_the_first_status() {
-        let mut bench = Bench::obeying(idle());
-        bench.run(secs(10));
-        let queries: Vec<Duration> = bench
+    fn prefs_queries(bench: &Bench) -> Vec<Duration> {
+        bench
             .writes()
             .into_iter()
             .filter(|(_, command)| *command == Command::QueryPrefs)
             .map(|(at, _)| at)
-            .collect();
-        assert_eq!(queries, [SPACING]);
+            .collect()
+    }
+
+    #[test]
+    fn queries_prefs_once_the_first_status_arrives() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(secs(10));
+        assert_eq!(prefs_queries(&bench), [SPACING]);
+    }
+
+    #[test]
+    fn queries_prefs_again_until_the_pad_answers() {
+        let mut bench = Bench::obeying(idle());
+        bench.prefs = None;
+        bench.run(secs(2));
+        bench.prefs = Some(Prefs {
+            max_dkmh: 60,
+            imperial: true,
+        });
+        bench.run(secs(10));
+        assert_eq!(prefs_queries(&bench).len(), 2);
+        assert!(bench.view().imperial);
+    }
+
+    #[test]
+    fn stops_querying_prefs_after_three_unanswered_queries() {
+        let mut bench = Bench::obeying(idle());
+        bench.prefs = None;
+        bench.run(secs(30));
+        let queries = prefs_queries(&bench);
+        assert_eq!(queries.len(), 3);
+        for pair in queries.windows(2) {
+            assert!(pair[1] - pair[0] >= PREFS_RETRY, "queries at {pair:?}");
+        }
+        assert_eq!(bench.view().max_kmh, 6.0);
     }
 
     #[test]
