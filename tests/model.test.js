@@ -422,3 +422,19 @@ test('weightFor prefers the daemon, then the bar entry, then 70 kg', () => {
   assert.equal(M.settingsWeight({ weightKg: 82 }), 82)
   assert.equal(M.settingsWeight({}), 0)
 })
+
+test('stopFailed singles out stops the pad did not carry out', () => {
+  assert.equal(
+    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'stop' }),
+    true,
+  )
+  assert.equal(
+    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'toggle' }),
+    true,
+  )
+  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'stop' }), true)
+  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'start' }), false)
+  assert.equal(M.stopFailed({ code: 'busy', cmd: 'stop' }), false)
+  assert.equal(M.stopFailed(null), false)
+  assert.ok(M.stopFailureText.includes('remote'))
+})

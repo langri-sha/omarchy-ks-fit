@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import "Model.js" as Model
 import "Version.js" as Version
 
@@ -59,7 +60,10 @@ QtObject {
   readonly property var currentStats: statsRevision >= 0 ? statsFor(statsPeriod, statsOffset) : null
 
   property string errorNotice: ""
-  readonly property string notice: demoBlocked ? Model.demoBlockedText(demo) : errorNotice
+  // Stays until the belt is seen standing or the user tries again.
+  property string stopFailure: ""
+  readonly property string notice: stopFailure !== "" ? stopFailure
+    : demoBlocked ? Model.demoBlockedText(demo) : errorNotice
   // Open panels, at most one per monitor. Held by object so a panel that a hot
   // reload destroys can take itself out (Component.onDestruction).
   property var panels: []
@@ -92,10 +96,16 @@ QtObject {
   function reconnect() { return send({ cmd: "connect" }) }
   function disconnect() { return send({ cmd: "disconnect" }) }
   function forget() { return send({ cmd: "forget" }) }
-  function start() { return send({ cmd: "start" }) }
-  function stop() { return send({ cmd: "stop" }) }
+  function start() { return beltCommand("start") }
+  function stop() { return beltCommand("stop") }
   // The daemon decides from the pad's latest status, not from this snapshot.
-  function toggleBelt() { return send({ cmd: "toggle" }) }
+  function toggleBelt() { return beltCommand("toggle") }
+
+  function beltCommand(cmd) {
+    if (!send({ cmd: cmd })) return false
+    stopFailure = ""
+    return true
+  }
 
   function connectTo(address, name) {
     var command = { cmd: "connect", address: String(address) }
@@ -119,7 +129,7 @@ QtObject {
     var effective = cmd === "toggle" ? (exercising ? "stop" : "start") : cmd
     var blocker = Model.beltBlocker(helper, state, effective)
     if (blocker !== "") return blocker
-    return send({ cmd: cmd }) ? "ok" : "helper-" + helper
+    return beltCommand(cmd) ? "ok" : "helper-" + helper
   }
 
   // rfkill, like the shell's own Bluetooth panel: the daemon never changes
@@ -189,7 +199,7 @@ QtObject {
       case "fatal": handleFatal(message); break
       case "state": handleState(message); break
       case "stats": handleStats(message); break
-      case "error": showNotice(Model.errorText(message)); break
+      case "error": handleError(message); break
     }
   }
 
@@ -225,9 +235,20 @@ QtObject {
     if (helper === "failed") helperError = String(message.message || message.code || "The helper stopped")
   }
 
+  function handleError(message) {
+    if (!Model.stopFailed(message)) {
+      showNotice(Model.errorText(message))
+      return
+    }
+    stopFailure = Model.stopFailureText
+    Util.execArgv(["omarchy-notification-send", "--app-name", "KS Fit", "-u", "critical",
+                   "-g", Model.glyphs.walk, Model.stopFailureText])
+  }
+
   function handleState(message) {
     var closed = state !== null && Model.sessionMark(message) !== Model.sessionMark(state)
     state = message
+    if (Model.connected(message) && !Model.exercising(message)) stopFailure = ""
     if (closed) refreshStats()
   }
 
