@@ -3,7 +3,14 @@
 // node:vm context with the pragma line stripped, so nothing here may reach
 // for QML globals or the current time.
 
+var glyphs = {
+  walk: '\u{F0583}', // md-walk
+}
+
 var speedStep = 0.5
+// Widest bar label short of an hour or ten thousand steps, so the bar
+// doesn't shift as the numbers grow.
+var barSample = '00:00 · 0,000'
 var periods = ['day', 'week', 'month', 'year']
 var backoffSteps = [1000, 2000, 5000, 15000, 30000]
 
@@ -72,6 +79,89 @@ function exercising(state) {
 
 function canNudge(state) {
   return connected(state) && state.pad.mode !== 'auto'
+}
+
+function pad2(n) {
+  return n < 10 ? '0' + n : String(n)
+}
+
+// Written out rather than toLocaleString: QML's engine and node disagree.
+function formatInt(n) {
+  var value = Math.round(Number(n) || 0)
+  var digits = String(Math.abs(value))
+  var out = ''
+  while (digits.length > 3) {
+    out = ',' + digits.slice(-3) + out
+    digits = digits.slice(0, -3)
+  }
+  return (value < 0 ? '-' : '') + digits + out
+}
+
+function formatDuration(seconds) {
+  var total = Math.max(0, Math.floor(Number(seconds) || 0))
+  var h = Math.floor(total / 3600)
+  var m = Math.floor((total % 3600) / 60)
+  var s = total % 60
+  return h > 0 ? h + ':' + pad2(m) + ':' + pad2(s) : m + ':' + pad2(s)
+}
+
+function formatSpeed(kmh) {
+  return (Math.round((Number(kmh) || 0) * 10) / 10).toFixed(1)
+}
+
+function deviceName(device) {
+  return device && device.name ? String(device.name) : 'the pad'
+}
+
+// A few words for the bar tooltip.
+function linkSummary(state) {
+  if (!state) return ''
+  if (state.bluetooth === 'off' || state.bluetooth === 'blocked')
+    return 'Bluetooth is off'
+  if (state.bluetooth === 'missing') return 'no Bluetooth adapter'
+  if (state.bluetooth === 'unavailable') return 'Bluetooth unavailable'
+  if (state.link === 'connected') return 'connected'
+  if (!state.device) return 'no pad selected'
+  if (state.link === 'searching')
+    return 'looking for ' + deviceName(state.device)
+  if (state.link === 'connecting') return 'connecting'
+  return 'disconnected'
+}
+
+function barText(state) {
+  if (!exercising(state)) return ''
+  var session = state.session || {}
+  return formatDuration(session.activeS) + ' · ' + formatInt(session.steps)
+}
+
+var helperTexts = {
+  starting: 'starting the helper',
+  missing: 'the helper is not built yet',
+  outdated: 'the helper needs a rebuild for this version',
+  failed: 'the helper stopped working',
+  stale: 'restart the shell to finish updating',
+}
+
+function tooltip(state, helperStatus) {
+  if (helperStatus !== 'ready')
+    return 'KS Fit — ' + (helperTexts[helperStatus] || helperTexts.starting)
+  if (!state) return 'KS Fit'
+  if (exercising(state)) {
+    if (state.pad.belt !== 'running') return 'KS Fit — starting the belt'
+    var session = state.session || {}
+    return (
+      'KS Fit — walking at ' +
+      formatSpeed(state.pad.speedKmh) +
+      ' km/h · ' +
+      formatDuration(session.activeS) +
+      ' · ' +
+      formatInt(session.steps) +
+      ' steps'
+    )
+  }
+  var steps = state.today ? Number(state.today.steps) || 0 : 0
+  var text = 'KS Fit — ' + linkSummary(state)
+  return steps > 0 ? text + ' · ' + formatInt(steps) + ' steps today' : text
 }
 
 function isPeriod(period) {

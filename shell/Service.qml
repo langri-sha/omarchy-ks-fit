@@ -30,6 +30,8 @@ QtObject {
   property string helperError: ""
   property string helperVersion: ""
   property bool simulated: false
+  // What the views branch on: `stale` wins over the helper's own state.
+  readonly property string helperStatus: stale ? "stale" : helper
 
   // The helper's last `state` snapshot, or null while it isn't running.
   property var state: null
@@ -37,6 +39,8 @@ QtObject {
   readonly property bool exercising: Model.exercising(state)
   readonly property var pad: connected ? state.pad : null
   readonly property var today: state && state.today ? state.today : null
+  readonly property string barText: helperStatus === "ready" ? Model.barText(state) : ""
+  readonly property string tooltip: Model.tooltip(state, helperStatus)
 
   // Kept here so every monitor's panel agrees and it survives a close.
   property string statsPeriod: "week"
@@ -322,7 +326,7 @@ QtObject {
     function faster(): void { root.nudge(Model.speedStep) }
     function slower(): void { root.nudge(-Model.speedStep) }
     function speed(kmh: real): void { root.setSpeed(kmh) }
-    function status(): string { return Model.statusJson(root.stale ? "stale" : root.helper, root.state) }
+    function status(): string { return Model.statusJson(root.helperStatus, root.state) }
     // bin/ks-fit-build calls this once the helper is in place.
     function retryHelper(): void { root.retryHelper() }
   }
