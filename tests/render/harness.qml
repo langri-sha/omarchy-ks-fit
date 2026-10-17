@@ -225,8 +225,10 @@ ShellRoot {
     {
       name: "stop key before the helper",
       run: function(done) {
-        var reply = service.ipcBelt("stop")
-        if (reply !== "helper-missing") fail("a stop before the helper answered " + reply)
+        var stopReply = service.ipcBelt("stop")
+        var toggleReply = service.ipcBelt("toggle")
+        if (stopReply !== "helper-missing") fail("a stop before the helper answered " + stopReply)
+        else if (toggleReply !== "helper-missing") fail("a toggle before the helper answered " + toggleReply)
         else if (service.stopFailure !== "") fail("a stop before the helper raised the alarm")
         else done()
       }
