@@ -4,8 +4,11 @@ use jiff::Timestamp;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 use std::fmt::Display;
+use std::fs::{self, DirBuilder};
+use std::io;
 use std::ops::Range;
-use std::path::Path;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 /// Schema migrations; the database's `user_version` counts those applied.
@@ -57,6 +60,71 @@ pub enum Error {
     JournalMode(String),
     #[error("setting {key} holds {value:?}, which is not a valid value")]
     Setting { key: &'static str, value: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DataDirError {
+    #[error("{}: {source}", path.display())]
+    Io { path: PathBuf, source: io::Error },
+    #[error("{} is a symlink", .0.display())]
+    Symlink(PathBuf),
+    #[error("{} is not a directory", .0.display())]
+    NotADirectory(PathBuf),
+    #[error("{} belongs to uid {owner}, not to uid {uid}", path.display())]
+    Foreign { path: PathBuf, owner: u32, uid: u32 },
+}
+
+/// Creates the data directory `dir` with mode 0700 when it is missing,
+/// refuses one that is a symlink, not a directory or not ours, and returns
+/// its canonical path, since [`Store::open`] refuses a path through any
+/// symlink, including a symlinked home.
+pub fn prepare_data_dir(dir: &Path) -> Result<PathBuf, DataDirError> {
+    let metadata = match fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)
+                .map_err(io_error(dir))?;
+            fs::symlink_metadata(dir).map_err(io_error(dir))?
+        }
+        metadata => metadata.map_err(io_error(dir))?,
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(DataDirError::Symlink(dir.to_owned()));
+    }
+    if !metadata.is_dir() {
+        return Err(DataDirError::NotADirectory(dir.to_owned()));
+    }
+    let uid = effective_uid()?;
+    if metadata.uid() != uid {
+        return Err(DataDirError::Foreign {
+            path: dir.to_owned(),
+            owner: metadata.uid(),
+            uid,
+        });
+    }
+    fs::canonicalize(dir).map_err(io_error(dir))
+}
+
+fn effective_uid() -> Result<u32, DataDirError> {
+    let path = Path::new("/proc/self/status");
+    fs::read_to_string(path)
+        .map_err(io_error(path))?
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .and_then(|ids| ids.split_whitespace().nth(1)?.parse().ok())
+        .ok_or_else(|| DataDirError::Io {
+            path: path.to_owned(),
+            source: io::Error::new(io::ErrorKind::InvalidData, "no effective uid"),
+        })
+}
+
+fn io_error(path: &Path) -> impl FnOnce(io::Error) -> DataDirError + '_ {
+    move |source| DataDirError::Io {
+        path: path.to_owned(),
+        source,
+    }
 }
 
 /// A reading of the pad's cumulative counters.
@@ -508,6 +576,88 @@ mod tests {
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn a_missing_data_dir_is_created_private() {
+        let root = TempDir::new("data-dir-missing");
+        let dir = root.join("share/omarchy-ks-fit");
+        let prepared = prepare_data_dir(&dir).unwrap();
+        assert_eq!(prepared, fs::canonicalize(&dir).unwrap());
+        assert_eq!(fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+    }
+
+    #[test]
+    fn an_existing_data_dir_is_kept() {
+        let root = TempDir::new("data-dir-existing");
+        let dir = root.join("omarchy-ks-fit");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("ks-fit.db"), "").unwrap();
+        assert_eq!(
+            prepare_data_dir(&dir).unwrap(),
+            fs::canonicalize(&dir).unwrap()
+        );
+        assert!(dir.join("ks-fit.db").exists());
+    }
+
+    #[test]
+    fn a_symlinked_data_dir_is_refused() {
+        let root = TempDir::new("data-dir-symlink");
+        fs::create_dir(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("omarchy-ks-fit")).unwrap();
+        assert!(matches!(
+            prepare_data_dir(&root.join("omarchy-ks-fit")),
+            Err(DataDirError::Symlink(_))
+        ));
+    }
+
+    #[test]
+    fn a_data_dir_that_is_a_file_is_refused() {
+        let root = TempDir::new("data-dir-file");
+        fs::write(root.join("omarchy-ks-fit"), "").unwrap();
+        assert!(matches!(
+            prepare_data_dir(&root.join("omarchy-ks-fit")),
+            Err(DataDirError::NotADirectory(_))
+        ));
+    }
+
+    #[test]
+    fn a_data_dir_owned_by_someone_else_is_refused() {
+        let foreign = Path::new("/");
+        let owner = fs::metadata(foreign).unwrap().uid();
+        let uid = effective_uid().unwrap();
+        if owner == uid {
+            return;
+        }
+        assert!(matches!(
+            prepare_data_dir(foreign),
+            Err(DataDirError::Foreign { owner: o, uid: u, .. }) if (o, u) == (owner, uid)
+        ));
+    }
+
+    #[test]
+    fn the_effective_uid_owns_the_files_we_create() {
+        let root = TempDir::new("data-dir-uid");
+        fs::write(root.join("mine"), "").unwrap();
+        assert_eq!(
+            effective_uid().unwrap(),
+            fs::metadata(root.join("mine")).unwrap().uid()
+        );
+    }
+
+    #[test]
+    fn a_data_dir_under_a_symlinked_parent_opens_by_its_real_path() {
+        let root = TempDir::new("data-dir-parent");
+        fs::create_dir_all(root.join("real/omarchy-ks-fit")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("home")).unwrap();
+        let dir = root.join("home/omarchy-ks-fit");
+        assert!(Store::open(&dir.join("ks-fit.db")).is_err());
+        let prepared = prepare_data_dir(&dir).unwrap();
+        assert_eq!(
+            prepared,
+            fs::canonicalize(root.join("real/omarchy-ks-fit")).unwrap()
+        );
+        assert!(Store::open(&prepared.join("ks-fit.db")).is_ok());
     }
 
     #[test]
