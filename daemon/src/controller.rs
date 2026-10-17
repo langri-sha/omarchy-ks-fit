@@ -162,8 +162,11 @@ struct Stopping {
     origin: Request,
     /// A speed 0 write waits for the pacer.
     queued: bool,
-    /// When to give up, pushed back while the belt keeps slowing down.
+    /// When to report the stop as failed, pushed back while the belt keeps
+    /// slowing down.
     deadline: Option<Instant>,
+    /// The failure went out; speed 0 still does while the belt may move.
+    reported: bool,
     last_speed: u8,
 }
 
@@ -397,6 +400,7 @@ impl Controller {
             origin,
             queued: true,
             deadline: None,
+            reported: false,
             last_speed: status.speed_dkmh,
         }));
     }
@@ -505,13 +509,16 @@ impl Controller {
             log::info!("the belt stopped");
             return None;
         }
-        if status.belt == Belt::Running {
+        if moving(status) {
             if status.speed_dkmh < stopping.last_speed
                 && let Some(deadline) = &mut stopping.deadline
             {
                 *deadline = (*deadline).max(now + STOP_PROGRESS);
             }
             stopping.queued = true;
+        } else if stopping.reported && matches!(status.belt, Belt::Unknown(_)) {
+            log::warn!("no longer stopping a belt in state {:?}", status.belt);
+            return None;
         }
         stopping.last_speed = status.speed_dkmh;
         Some(Op::Stop(stopping))
@@ -610,9 +617,14 @@ impl Controller {
                 log::warn!("the belt kept counting down; no longer waiting for it");
                 None
             }
-            Op::Stop(stopping) if stopping.deadline.is_some_and(|deadline| now >= deadline) => {
+            Op::Stop(mut stopping) if stopping.deadline.is_some_and(|deadline| now >= deadline) => {
                 self.fail(stopping.origin, Failure::StopNotAcknowledged, actions);
-                None
+                stopping.deadline = None;
+                stopping.reported = true;
+                let settled = self.status.is_some_and(|(_, status)| {
+                    matches!(status.belt, Belt::Unknown(_)) && status.speed_dkmh == 0
+                });
+                (!settled).then_some(Op::Stop(stopping))
             }
             Op::Speed(attempt) if attempt.overdue(now) => {
                 if speed != attempt.from {
@@ -721,7 +733,9 @@ impl Controller {
             ) => attempt.sent(now, START_WAIT, speed),
             (Some(Op::Stop(stopping)), Command::ChangeSpeed(0)) => {
                 stopping.queued = false;
-                stopping.deadline.get_or_insert(now + STOP_WAIT);
+                if !stopping.reported {
+                    stopping.deadline.get_or_insert(now + STOP_WAIT);
+                }
             }
             (Some(Op::Speed(attempt)), Command::ChangeSpeed(_)) => {
                 attempt.sent(now, SPEED_WAIT, speed)
@@ -807,6 +821,12 @@ impl Peers {
 
 fn at_rest(status: &Status) -> bool {
     matches!(status.belt, Belt::Idle | Belt::Standby)
+}
+
+/// An unknown state with a speed counts as moving; it is never assumed safe.
+fn moving(status: &Status) -> bool {
+    status.belt == Belt::Running
+        || (matches!(status.belt, Belt::Unknown(_)) && status.speed_dkmh > 0)
 }
 
 fn tenths(kmh: f64) -> Result<u8, Failure> {
@@ -1279,20 +1299,76 @@ mod tests {
     }
 
     #[test]
-    fn stop_repeats_speed_zero_while_the_belt_runs_and_gives_up_without_progress() {
+    fn stop_reports_a_belt_that_keeps_running_once_and_keeps_sending_speed_zero() {
         let mut bench = Bench::stubborn(running(40));
         bench.run(secs(2));
         bench.request(Request::Stop);
         bench.run(secs(10));
-        let commands = bench.commands();
-        assert!(commands.len() >= 8, "{commands:?}");
-        assert!(commands.iter().all(|c| *c == Command::ChangeSpeed(0)));
+        assert_eq!(
+            bench.failures(),
+            [(Request::Stop, Failure::StopNotAcknowledged)]
+        );
+        assert_eq!(bench.view().busy, Some(Busy::Stopping));
+        let reported = bench.elapsed();
+        bench.run(secs(5));
+        let after = bench.commands_since(reported);
+        assert!(after.len() >= 5, "{after:?}");
+        assert!(after.iter().all(|c| *c == Command::ChangeSpeed(0)));
+        assert_eq!(bench.failures().len(), 1);
+        bench.set_pad(idle());
+        bench.run(secs(2));
+        assert_eq!(bench.view().busy, None);
+        assert_spaced(&bench);
+    }
+
+    #[test]
+    fn a_countdown_that_outlasts_the_stop_deadline_still_gets_speed_zero() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.run(secs(1));
+        assert_eq!(bench.view().belt, Belt::Starting);
+        let stopped_at = bench.elapsed();
+        bench.request(Request::Stop);
+        bench.run(secs(8));
+        assert_eq!(
+            bench.failures(),
+            [(Request::Stop, Failure::StopNotAcknowledged)]
+        );
+        assert_eq!(bench.view().busy, Some(Busy::Stopping));
+        let running_at = bench.elapsed();
+        bench.set_pad(running(20));
+        bench.run(secs(2));
+        assert_eq!(bench.commands_since(running_at), [Command::ChangeSpeed(0)]);
+        assert!(
+            bench
+                .commands_since(stopped_at)
+                .iter()
+                .all(|c| *c == Command::ChangeSpeed(0))
+        );
+        assert_eq!(bench.view().belt, Belt::Idle);
+        assert_eq!(bench.view().busy, None);
+        assert_eq!(bench.failures().len(), 1);
+    }
+
+    #[test]
+    fn stop_ends_after_reporting_a_belt_that_rests_in_an_unknown_state() {
+        let mut bench = Bench::stubborn(status(Belt::Unknown(2), Mode::Manual, 0));
+        bench.request(Request::Stop);
+        bench.run(secs(8));
         assert_eq!(
             bench.failures(),
             [(Request::Stop, Failure::StopNotAcknowledged)]
         );
         assert_eq!(bench.view().busy, None);
-        assert_spaced(&bench);
+    }
+
+    #[test]
+    fn stop_repeats_speed_zero_for_an_unknown_state_that_moves() {
+        let mut bench = Bench::stubborn(status(Belt::Unknown(3), Mode::Manual, 30));
+        bench.request(Request::Stop);
+        bench.run(secs(3));
+        assert!(bench.commands().len() >= 3, "{:?}", bench.commands());
     }
 
     #[test]
