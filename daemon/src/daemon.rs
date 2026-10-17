@@ -48,10 +48,14 @@ const LOCK_RETRY: Duration = Duration::from_millis(250);
 pub enum Fatal {
     #[error("another ks-fit daemon is running")]
     AlreadyRunning,
+    #[error("no data directory: pass --data-dir or set XDG_DATA_HOME or HOME")]
+    NoDataDir,
     #[error(transparent)]
     DataDir(#[from] DataDirError),
     #[error("cannot lock {}: {source}", path.display())]
     Lock { path: PathBuf, source: io::Error },
+    #[error("cannot watch for signals: {0}")]
+    Signals(io::Error),
     #[error("{0:#}")]
     Database(#[from] anyhow::Error),
     #[error("the Bluetooth task stopped")]
@@ -63,8 +67,9 @@ impl Fatal {
     pub fn code(&self) -> &'static str {
         match self {
             Fatal::AlreadyRunning => "already-running",
-            Fatal::DataDir(_) => "data-dir",
+            Fatal::NoDataDir | Fatal::DataDir(_) => "data-dir",
             Fatal::Lock { .. } => "lock",
+            Fatal::Signals(_) => "signals",
             Fatal::Database(_) => "database",
             Fatal::RadioStopped => "radio",
         }
