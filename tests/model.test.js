@@ -850,3 +850,39 @@ test('withSetting copies the entry with one field changed', () => {
   assert.deepEqual(entry.weightKg, 70)
   assert.deepEqual(plain(M.withSetting(null, 'weightKg', 82)), { weightKg: 82 })
 })
+
+test('ipcPlan sends whenever a helper listens and alarms on undeliverable stops', () => {
+  const away = state({ link: 'disconnected', pad: null })
+  const running = state({ pad: pad({ belt: 'running' }) })
+  assert.deepEqual(plain(M.ipcPlan('ready', true, state(), 'start')), {
+    send: true,
+    reply: 'ok',
+    stopFailed: false,
+  })
+  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'stop')), {
+    send: true,
+    reply: 'not-connected',
+    stopFailed: false,
+  })
+  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'start')), {
+    send: true,
+    reply: 'not-connected',
+    stopFailed: false,
+  })
+  assert.deepEqual(plain(M.ipcPlan('missing', false, null, 'stop')), {
+    send: false,
+    reply: 'helper-missing',
+    stopFailed: true,
+  })
+  assert.deepEqual(plain(M.ipcPlan('ready', false, running, 'toggle')), {
+    send: false,
+    reply: 'helper-starting',
+    stopFailed: true,
+  })
+  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'start')), {
+    send: false,
+    reply: 'helper-starting',
+    stopFailed: false,
+  })
+  assert.equal(M.ipcPlan('ready', true, running, 'toggle').reply, 'ok')
+})
