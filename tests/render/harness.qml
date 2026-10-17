@@ -223,6 +223,15 @@ ShellRoot {
       run: function(done) { grab([[card, "helper-missing"], [barStrip, "bar-missing"]], done) }
     },
     {
+      name: "stop key before the helper",
+      run: function(done) {
+        var reply = service.ipcBelt("stop")
+        if (reply !== "helper-missing") fail("a stop before the helper answered " + reply)
+        else if (service.stopFailure !== "") fail("a stop before the helper raised the alarm")
+        else done()
+      }
+    },
+    {
       name: "build",
       run: function(done) {
         placeHelper.done = function() {
@@ -500,7 +509,21 @@ ShellRoot {
       mockOnly: true,
       until: function() { return snapshot().bluetooth === "on" && snapshot().linkDetail === "not-found" },
       settle: 300,
-      run: function(done) { grab([[card, "not-found"]], done) }
+      run: function(done) {
+        grab([[card, "not-found"]], function() {
+          service.ipcBelt("stop")
+          done()
+        })
+      }
+    },
+    {
+      name: "stop with the pad away",
+      mockOnly: true,
+      until: function() { return service.errorNotice !== "" || service.stopFailure !== "" },
+      run: function(done) {
+        if (service.stopFailure !== "") fail("a stop with the belt at rest and the pad away raised the alarm")
+        else done()
+      }
     },
     {
       name: "walk again",

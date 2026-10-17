@@ -251,10 +251,11 @@ function beltBlocker(helper, state, cmd) {
 // An IPC belt command goes to the helper whenever one can hear it, even if
 // the cached state predicts a refusal: the daemon's answer is the one that
 // raises a failed stop's alarm, and a start is a cue to look for the pad.
-// `listening`: the helper reads what is written to it now. `reply` is what
-// the CLI prints; `stopFailed` asks for the alarm when a stop can't be
-// delivered at all.
-function ipcPlan(helper, listening, state, cmd) {
+// `listening`: the helper reads what is written to it now; `moving`: the
+// service's mayBeMoving latch. `reply` is what the CLI prints; `stopFailed`
+// asks for the alarm when a stop can't be delivered at all while the belt may
+// be moving.
+function ipcPlan(helper, listening, state, cmd, moving) {
   var effective = cmd === 'toggle' ? (exercising(state) ? 'stop' : 'start') : cmd
   var reachable = helper === 'ready' && !!listening
   var blocker = beltBlocker(helper, state, effective)
@@ -266,7 +267,7 @@ function ipcPlan(helper, listening, state, cmd) {
         : reachable
           ? 'ok'
           : 'helper-' + (helper === 'ready' ? 'starting' : helper),
-    stopFailed: !reachable && effective === 'stop',
+    stopFailed: !reachable && effective === 'stop' && moving === true,
   }
 }
 
@@ -286,12 +287,15 @@ function sessionMark(state) {
 
 var stopFailureText = "KS Fit couldn't stop the belt — use the remote"
 
-// A stop the pad didn't carry out: someone may still be walking.
-function stopFailed(message) {
+// A stop the pad didn't carry out while the belt may be moving (`moving`, the
+// service's latch): someone may still be walking. With the belt last seen at
+// rest, such as before the helper is up at boot, it is no alarm.
+function stopFailed(message, moving) {
   var m = message || {}
   return (
-    m.code === 'stop-not-acknowledged' ||
-    (m.code === 'not-connected' && m.cmd === 'stop')
+    moving === true &&
+    (m.code === 'stop-not-acknowledged' ||
+      (m.code === 'not-connected' && m.cmd === 'stop'))
   )
 }
 

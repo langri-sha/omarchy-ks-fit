@@ -45,10 +45,11 @@ cargo clippy --locked --all-targets -- -D warnings
   range, a link lost mid-walk and demo mode. Along the way it checks that a
   hovered Start doesn't start the belt, that arrow keys reach it, that
   `Backspace` stops it, that a late click on Stop can't land on Start, that a
-  demo switch and Restart shell wait through the lost link, and that a helper
-  being restarted takes no commands. It prints `HARNESS ok` at the end. Desktop
-  commands such as `omarchy-notification-send` are stubbed on `PATH`, and a call
-  to any of them fails the run.
+  demo switch and Restart shell wait through the lost link, that a helper being
+  restarted takes no commands, and that a stop key with the belt at rest raises
+  no alarm. It prints `HARNESS ok` at the end. Desktop commands such as
+  `omarchy-notification-send` are stubbed on `PATH`, and a call to any of them
+  fails the run.
 - `KS_FIT_RENDER_HELPER=target/debug/ks-fit pnpm plugin:render` drives the real
   helper instead, in demo mode and with its data under a temp dir; the steps
   that need the mock's `{"cmd":"mock",…}` controls are skipped.

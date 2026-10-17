@@ -458,20 +458,35 @@ test('weightFor prefers the daemon, then the bar entry, then 70 kg', () => {
   assert.equal(M.settingsWeight({}), 0)
 })
 
-test('stopFailed singles out stops the pad did not carry out', () => {
+test('stopFailed singles out stops the pad did not carry out while the belt may move', () => {
   assert.equal(
-    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'stop' }),
+    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'stop' }, true),
     true,
   )
   assert.equal(
-    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'toggle' }),
+    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'toggle' }, true),
     true,
   )
-  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'stop' }), true)
-  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'start' }), false)
-  assert.equal(M.stopFailed({ code: 'busy', cmd: 'stop' }), false)
-  assert.equal(M.stopFailed(null), false)
+  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'stop' }, true), true)
+  assert.equal(
+    M.stopFailed({ code: 'not-connected', cmd: 'start' }, true),
+    false,
+  )
+  assert.equal(M.stopFailed({ code: 'busy', cmd: 'stop' }, true), false)
+  assert.equal(M.stopFailed(null, true), false)
   assert.ok(M.stopFailureText.includes('remote'))
+})
+
+test('stopFailed raises no alarm for a belt last seen at rest', () => {
+  assert.equal(
+    M.stopFailed({ code: 'not-connected', cmd: 'stop' }, false),
+    false,
+  )
+  assert.equal(
+    M.stopFailed({ code: 'stop-not-acknowledged', cmd: 'stop' }, false),
+    false,
+  )
+  assert.equal(M.stopFailed({ code: 'not-connected', cmd: 'stop' }), false)
 })
 
 const weekStats = (fields) => ({
@@ -908,35 +923,48 @@ test('withSetting copies the entry with one field changed', () => {
 test('ipcPlan sends whenever a helper listens and alarms on undeliverable stops', () => {
   const away = state({ link: 'disconnected', pad: null })
   const running = state({ pad: pad({ belt: 'running' }) })
-  assert.deepEqual(plain(M.ipcPlan('ready', true, state(), 'start')), {
+  assert.deepEqual(plain(M.ipcPlan('ready', true, state(), 'start', false)), {
     send: true,
     reply: 'ok',
     stopFailed: false,
   })
-  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'stop')), {
+  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'stop', true)), {
     send: true,
     reply: 'not-connected',
     stopFailed: false,
   })
-  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'start')), {
+  assert.deepEqual(plain(M.ipcPlan('ready', true, away, 'start', false)), {
     send: true,
     reply: 'not-connected',
     stopFailed: false,
   })
-  assert.deepEqual(plain(M.ipcPlan('missing', false, null, 'stop')), {
+  assert.deepEqual(plain(M.ipcPlan('missing', false, null, 'stop', true)), {
     send: false,
     reply: 'helper-missing',
     stopFailed: true,
   })
-  assert.deepEqual(plain(M.ipcPlan('ready', false, running, 'toggle')), {
+  assert.deepEqual(plain(M.ipcPlan('ready', false, running, 'toggle', true)), {
     send: false,
     reply: 'helper-starting',
     stopFailed: true,
   })
-  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'start')), {
+  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'start', false)), {
     send: false,
     reply: 'helper-starting',
     stopFailed: false,
   })
-  assert.equal(M.ipcPlan('ready', true, running, 'toggle').reply, 'ok')
+  assert.equal(M.ipcPlan('ready', true, running, 'toggle', true).reply, 'ok')
+})
+
+test('ipcPlan raises no alarm for an undeliverable stop to a belt last seen at rest', () => {
+  assert.deepEqual(plain(M.ipcPlan('missing', false, null, 'stop', false)), {
+    send: false,
+    reply: 'helper-missing',
+    stopFailed: false,
+  })
+  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'stop', false)), {
+    send: false,
+    reply: 'helper-starting',
+    stopFailed: false,
+  })
 })
