@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts the helper for the plugin's service. Quickshell kills a stopped
+# Starts the helper for the plugin's service. Quickshell kills a destroyed
 # Process's direct child outright, so the helper runs as this script's child
 # instead: it then reads EOF on stdin and shuts down cleanly, without touching
 # the belt.
@@ -27,4 +27,19 @@ if [[ ! -x $helper ]]; then
 fi
 
 "$helper" daemon "$@" <&0 &
-wait $!
+pid=$!
+
+# Quickshell's `running = false` sends TERM to this script only; pass it on so
+# the helper shuts down on its own terms rather than being orphaned.
+trap 'kill -TERM "$pid" 2>/dev/null' TERM
+trap 'kill -INT "$pid" 2>/dev/null' INT
+
+# A trapped signal interrupts `wait`; keep waiting until the helper is gone,
+# then exit with its status.
+set +e
+while :; do
+  wait "$pid"
+  status=$?
+  kill -0 "$pid" 2>/dev/null || break
+done
+exit "$status"
