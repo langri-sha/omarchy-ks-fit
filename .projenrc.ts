@@ -234,6 +234,27 @@ project.package?.addEngine('pnpm', '>= 11.0.0')
 project.package?.setScript('format', 'prettier --write .')
 project.package?.setScript('format:check', 'prettier --check .')
 
+project.testTask.exec('cargo test --locked')
+project.testTask.exec("node --test 'tests/**/*.test.js'")
+project.package?.setScript('test', 'pnpm exec projen test')
+
+project.addTask('qmllint', {
+  description: 'Lint the plugin QML against the installed Omarchy shell',
+  exec: 'scripts/qmllint.sh',
+})
+
+project.addTask('plugin:render', {
+  description:
+    'Render the plugin offscreen against a mock helper (KS_FIT_RENDER_HELPER picks another)',
+  exec: 'tests/render/render.sh',
+})
+
+project.addTask('plugin:validate', {
+  description:
+    'Validate the plugin as `omarchy plugin add` would clone it, without node_modules',
+  exec: 'scripts/validate-plugin.sh',
+})
+
 project.annotateGenerated('/Cargo.lock')
 
 project.gitattributes.addAttributes(

@@ -23,8 +23,12 @@
     "default": "pnpm exec projen default",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "plugin:render": "pnpm exec projen plugin:render",
+    "plugin:validate": "pnpm exec projen plugin:validate",
     "prepare": "husky",
+    "qmllint": "pnpm exec projen qmllint",
     "renovate": "pnpm exec projen renovate",
+    "test": "pnpm exec projen test",
     "worktrunk:dry-run": "pnpm exec projen worktrunk:dry-run",
     "worktrunk:show": "pnpm exec projen worktrunk:show"
   },

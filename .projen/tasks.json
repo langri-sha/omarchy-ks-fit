@@ -27,6 +27,33 @@
         }
       ]
     },
+    "plugin:render": {
+      "name": "plugin:render",
+      "description": "Render the plugin offscreen against a mock helper (KS_FIT_RENDER_HELPER picks another)",
+      "steps": [
+        {
+          "exec": "tests/render/render.sh"
+        }
+      ]
+    },
+    "plugin:validate": {
+      "name": "plugin:validate",
+      "description": "Validate the plugin as `omarchy plugin add` would clone it, without node_modules",
+      "steps": [
+        {
+          "exec": "scripts/validate-plugin.sh"
+        }
+      ]
+    },
+    "qmllint": {
+      "name": "qmllint",
+      "description": "Lint the plugin QML against the installed Omarchy shell",
+      "steps": [
+        {
+          "exec": "scripts/qmllint.sh"
+        }
+      ]
+    },
     "renovate": {
       "name": "renovate",
       "description": "Run Renovate locally for debugging",
@@ -38,7 +65,15 @@
     },
     "test": {
       "name": "test",
-      "description": "Run tests"
+      "description": "Run tests",
+      "steps": [
+        {
+          "exec": "cargo test --locked"
+        },
+        {
+          "exec": "node --test 'tests/**/*.test.js'"
+        }
+      ]
     },
     "worktrunk:dry-run": {
       "name": "worktrunk:dry-run",
