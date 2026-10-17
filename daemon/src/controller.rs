@@ -27,6 +27,8 @@ const FALLBACK_MAX_DKMH: u8 = 60;
 pub enum Request {
     Start,
     Stop,
+    /// Start an idle belt, otherwise stop.
+    Toggle,
     /// Set the target speed in km/h.
     SetTarget(f64),
     /// Change the target speed by this many km/h.
@@ -246,7 +248,7 @@ impl Controller {
 
     pub fn request(&mut self, now: Instant, request: Request) -> Vec<Action> {
         let mut actions = Vec::new();
-        if let Err(failure) = self.begin(request, &mut actions) {
+        if let Err(failure) = self.begin(now, request, &mut actions) {
             self.fail(request, failure, &mut actions);
         }
         self.advance(now, &mut actions);
@@ -300,9 +302,14 @@ impl Controller {
         })
     }
 
-    fn begin(&mut self, request: Request, actions: &mut Vec<Action>) -> Result<(), Failure> {
-        let status = match self.status {
-            Some((_, status)) if !self.dead => status,
+    fn begin(
+        &mut self,
+        now: Instant,
+        request: Request,
+        actions: &mut Vec<Action>,
+    ) -> Result<(), Failure> {
+        let (at, status) = match self.status {
+            Some(newest) if !self.dead => newest,
             _ => return Err(Failure::NotConnected),
         };
         match request {
@@ -310,6 +317,15 @@ impl Controller {
             Request::Stop => {
                 self.stop(request, &status);
                 Ok(())
+            }
+            Request::Toggle => {
+                let fresh = now.saturating_duration_since(at) <= FRESH;
+                if fresh && at_rest(&status) && self.op.is_none() {
+                    self.start(request, &status)
+                } else {
+                    self.stop(request, &status);
+                    Ok(())
+                }
             }
             Request::SetTarget(kmh) => self.steer(&status, tenths(kmh)?, actions),
             Request::Nudge(delta) => {
@@ -1435,6 +1451,62 @@ mod tests {
         assert_eq!(bench.view().belt, Belt::Idle);
         assert_eq!(bench.failures(), []);
         assert_spaced(&bench);
+    }
+
+    #[test]
+    fn toggle_starts_a_resting_belt_on_a_fresh_status() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(secs(2));
+        bench.request(Request::Toggle);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::StartBelt]);
+    }
+
+    #[test]
+    fn toggle_stops_a_running_belt() {
+        let mut bench = Bench::obeying(running(40));
+        bench.run(secs(2));
+        bench.request(Request::Toggle);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+        assert_eq!(bench.view().belt, Belt::Idle);
+    }
+
+    #[test]
+    fn toggle_stops_a_belt_that_is_starting() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.request(Request::Toggle);
+        bench.run(secs(3));
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+    }
+
+    #[test]
+    fn toggle_stops_instead_of_starting_on_a_stale_status() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(ms(1500));
+        bench.pad = None;
+        bench.run(secs(3));
+        bench.request(Request::Toggle);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+    }
+
+    #[test]
+    fn toggle_never_starts_a_belt_in_an_unknown_state() {
+        let mut bench = Bench::stubborn(status(Belt::Unknown(2), Mode::Manual, 0));
+        bench.run(secs(1));
+        bench.request(Request::Toggle);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+    }
+
+    #[test]
+    fn toggle_reports_failures_as_the_toggle() {
+        let mut bench = Bench::silent();
+        bench.request(Request::Toggle);
+        assert_eq!(bench.failures(), [(Request::Toggle, Failure::NotConnected)]);
     }
 
     #[test]
