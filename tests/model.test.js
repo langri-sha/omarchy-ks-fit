@@ -391,3 +391,8 @@ test('beltBlocker lets stop through on any link and gates start', () => {
     '',
   )
 })
+
+test('demoBlockedText says which way the switch is waiting', () => {
+  assert.equal(M.demoBlockedText(true), 'Demo mode starts once the belt stops')
+  assert.equal(M.demoBlockedText(false), 'Demo mode ends once the belt stops')
+})
