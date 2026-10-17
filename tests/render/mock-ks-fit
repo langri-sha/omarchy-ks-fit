@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+import calendar
+import datetime
+import json
+import os
+import select
+import sys
+import time
+import zlib
+
+CANDIDATE = {"address": "C8:47:8C:12:34:56", "name": "KS-ST-A1P", "rssi": -58, "candidate": True}
+NEARBY = [
+    CANDIDATE,
+    {"address": "F4:4E:FD:00:11:22", "name": "Some Headphones", "rssi": -45, "candidate": False},
+    {"address": "C8:47:8C:65:43:21", "name": "WalkingPad A1", "rssi": -72, "candidate": True},
+    {"address": "D2:1A:7B:9C:3E:01", "name": None, "rssi": -81, "candidate": False},
+]
+
+
+def manifest_version():
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    try:
+        with open(os.path.join(root, "manifest.json"), encoding="utf-8") as handle:
+            return json.load(handle)["version"]
+    except (OSError, ValueError, KeyError):
+        return "0.0.0"
+
+
+def emit(message):
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def hour_key(moment):
+    return moment.strftime("%Y-%m-%dT%H")
+
+
+class Mock:
+    def __init__(self, simulated):
+        self.simulated = simulated
+        self.weight = 70.0
+        self.bluetooth = "on"
+        self.link = "disconnected"
+        self.detail = None
+        self.device = None
+        self.scan_active = False
+        self.scan_devices = []
+        self.pad = None
+        self.session = None
+        self.last_session = None
+        self.sessions_today = 0
+        self.next_session_id = 41
+        self.walked = {}
+        self.timers = []
+        self.dirty = True
+        self.last_emit = 0.0
+        self.carry = [0.0, 0.0, 0.0]
+
+    def now(self):
+        return datetime.datetime.now()
+
+    def later(self, delay, action):
+        self.timers.append((time.monotonic() + delay, action))
+
+    def run_timers(self):
+        due = [entry for entry in self.timers if entry[0] <= time.monotonic()]
+        self.timers = [entry for entry in self.timers if entry[0] > time.monotonic()]
+        for _, action in due:
+            action()
+
+    def history_steps(self, moment):
+        if moment > self.now():
+            return 0
+        base = 0
+        if 8 <= moment.hour <= 19:
+            seed = zlib.crc32(hour_key(moment).encode())
+            weekend = moment.weekday() >= 5
+            if seed % 4 == 0 and not (weekend and seed % 3):
+                base = 1200 + seed % 2400
+        return base + int(self.walked.get(hour_key(moment), 0))
+
+    def day_steps(self, day):
+        start = datetime.datetime.combine(day, datetime.time())
+        return [self.history_steps(start + datetime.timedelta(hours=h)) for h in range(24)]
+
+    def bucket(self, key, steps):
+        return {
+            "key": key,
+            "steps": steps,
+            "kcal": round(steps * 0.041, 1),
+            "distanceM": int(steps * 0.68),
+            "activeS": int(steps / 1.8),
+        }
+
+    def stats(self, period, offset):
+        offset = min(0, int(offset))
+        today = self.now().date()
+        buckets = []
+        if period == "day":
+            day = today + datetime.timedelta(days=offset)
+            start = end = day
+            for hour, steps in enumerate(self.day_steps(day)):
+                buckets.append(self.bucket(f"{day.isoformat()}T{hour:02d}", steps))
+        elif period == "week":
+            start = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=offset)
+            end = start + datetime.timedelta(days=6)
+            for i in range(7):
+                day = start + datetime.timedelta(days=i)
+                buckets.append(self.bucket(day.isoformat(), sum(self.day_steps(day))))
+        elif period == "month":
+            index = today.year * 12 + today.month - 1 + offset
+            year, month = divmod(index, 12)
+            length = calendar.monthrange(year, month + 1)[1]
+            start = datetime.date(year, month + 1, 1)
+            end = datetime.date(year, month + 1, length)
+            for i in range(length):
+                day = start + datetime.timedelta(days=i)
+                buckets.append(self.bucket(day.isoformat(), sum(self.day_steps(day))))
+        elif period == "year":
+            year = today.year + offset
+            start = datetime.date(year, 1, 1)
+            end = datetime.date(year, 12, 31)
+            for month in range(1, 13):
+                length = calendar.monthrange(year, month)[1]
+                steps = 0
+                for day in range(1, length + 1):
+                    steps += sum(self.day_steps(datetime.date(year, month, day)))
+                buckets.append(self.bucket(f"{year}-{month:02d}", steps))
+        else:
+            return None
+        totals = {
+            "steps": sum(b["steps"] for b in buckets),
+            "kcal": round(sum(b["kcal"] for b in buckets), 1),
+            "distanceM": sum(b["distanceM"] for b in buckets),
+            "activeS": sum(b["activeS"] for b in buckets),
+        }
+        return {
+            "type": "stats",
+            "period": period,
+            "offset": offset,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "buckets": buckets,
+            "totals": totals,
+            "activeBuckets": sum(1 for b in buckets if b["steps"] > 0),
+        }
+
+    def today(self):
+        day = self.now().date()
+        steps = sum(self.day_steps(day))
+        return {
+            "date": day.isoformat(),
+            "steps": steps,
+            "distanceM": int(steps * 0.68),
+            "activeS": int(steps / 1.8),
+            "kcal": round(steps * 0.041, 1),
+            "sessions": self.sessions_today + (1 if self.session else 0),
+        }
+
+    def snapshot(self):
+        return {
+            "type": "state",
+            "bluetooth": self.bluetooth,
+            "link": self.link,
+            "linkDetail": self.detail,
+            "device": self.device,
+            "autoConnect": True,
+            "scan": {"active": self.scan_active, "devices": list(self.scan_devices)},
+            "pad": dict(self.pad) if self.pad else None,
+            "session": dict(self.session) if self.session else None,
+            "lastSession": dict(self.last_session) if self.last_session else None,
+            "today": self.today(),
+            "weightKg": self.weight,
+        }
+
+    def changed(self):
+        self.dirty = True
+
+    def flush(self, force=False):
+        if self.dirty and (force or time.monotonic() - self.last_emit >= 0.25):
+            emit(self.snapshot())
+            self.dirty = False
+            self.last_emit = time.monotonic()
+
+    def error(self, code, cmd, message=""):
+        emit({"type": "error", "code": code, "message": message or code, "cmd": cmd})
+
+    def connected(self):
+        return self.link == "connected" and self.pad is not None
+
+    def moving(self):
+        return self.connected() and (self.pad["belt"] in ("starting", "running") or self.pad["busy"] == "starting")
+
+    def close_session(self):
+        if self.session:
+            self.session["endedAt"] = int(time.time())
+            self.last_session = self.session
+            self.sessions_today += 1
+            self.session = None
+
+    def drop_link(self, detail):
+        self.close_session()
+        self.link = "disconnected"
+        self.detail = detail
+        self.pad = None
+        self.changed()
+
+    def search(self):
+        if self.bluetooth != "on" or not self.device:
+            return
+        self.link = "searching"
+        self.detail = None
+        self.pad = None
+        self.changed()
+        self.later(0.4, self.connecting)
+
+    def connecting(self):
+        if self.link != "searching":
+            return
+        self.link = "connecting"
+        self.changed()
+        self.later(0.4, self.attach)
+
+    def attach(self):
+        if self.link != "connecting":
+            return
+        self.link = "connected"
+        self.pad = {
+            "belt": "idle",
+            "mode": "manual",
+            "speedKmh": 0.0,
+            "targetKmh": 3.0,
+            "minKmh": 0.5,
+            "maxKmh": 6.0,
+            "busy": None,
+            "imperial": False,
+            "shared": False,
+        }
+        self.changed()
+
+    def start(self, cmd):
+        if not self.connected():
+            return self.error("not-connected", cmd)
+        if self.moving():
+            return
+        if self.pad["busy"]:
+            return self.error("busy", cmd)
+        self.pad["busy"] = "starting"
+        self.changed()
+        self.later(0.5, self.countdown)
+
+    def countdown(self):
+        if self.connected() and self.pad["busy"] == "starting":
+            self.pad["belt"] = "starting"
+            self.changed()
+            self.later(3.0, self.belt_running)
+
+    def belt_running(self):
+        if not self.connected() or self.pad["belt"] != "starting":
+            return
+        self.pad["belt"] = "running"
+        self.pad["busy"] = None
+        self.pad["speedKmh"] = 2.0
+        if not self.session:
+            self.session = {
+                "id": self.next_session_id,
+                "startedAt": int(time.time()),
+                "activeS": 0,
+                "steps": 0,
+                "distanceM": 0,
+                "kcal": 0.0,
+                "avgKmh": 0.0,
+                "maxKmh": 0.0,
+            }
+            self.next_session_id += 1
+        self.changed()
+
+    def stop(self, cmd):
+        if not self.connected():
+            return self.error("not-connected", cmd)
+        if self.pad["belt"] in ("idle", "standby") and not self.pad["busy"]:
+            return
+        self.pad["busy"] = "stopping"
+        self.changed()
+
+    def set_target(self, kmh):
+        pad = self.pad
+        pad["targetKmh"] = round(max(pad["minKmh"], min(pad["maxKmh"], kmh)), 1)
+        self.changed()
+
+    def walk(self, seconds):
+        pad = self.pad
+        kmh = pad["speedKmh"]
+        steps = (60 + 12 * kmh) / 60 * seconds + self.carry[0]
+        metres = kmh / 3.6 * seconds + self.carry[1]
+        whole_steps, whole_metres = int(steps), int(metres)
+        self.carry = [steps - whole_steps, metres - whole_metres, 0.0]
+        session = self.session
+        session["activeS"] += int(seconds)
+        session["steps"] += whole_steps
+        session["distanceM"] += whole_metres
+        session["kcal"] = round(session["kcal"] + 3.5 * 3.5 * self.weight / 200 * seconds / 60, 1)
+        session["maxKmh"] = max(session["maxKmh"], kmh)
+        if session["activeS"]:
+            session["avgKmh"] = round(session["distanceM"] / session["activeS"] * 3.6, 1)
+        key = hour_key(self.now())
+        self.walked[key] = self.walked.get(key, 0) + whole_steps
+
+    def tick(self, dt):
+        if not self.connected():
+            return
+        pad = self.pad
+        if pad["belt"] == "running":
+            goal = 0.0 if pad["busy"] == "stopping" else pad["targetKmh"]
+            if abs(pad["speedKmh"] - goal) > 0.05:
+                step = 1.0 * dt
+                pad["speedKmh"] = round(pad["speedKmh"] + max(-step, min(step, goal - pad["speedKmh"])), 1)
+                self.changed()
+            if pad["busy"] == "stopping" and pad["speedKmh"] <= 0.05:
+                pad["speedKmh"] = 0.0
+                pad["belt"] = "idle"
+                pad["busy"] = None
+                self.close_session()
+                self.changed()
+        elif pad["busy"] == "stopping":
+            pad["belt"] = "idle"
+            pad["busy"] = None
+            self.close_session()
+            self.changed()
+
+    def second(self):
+        if self.connected() and self.pad["belt"] == "running" and self.session:
+            self.walk(1)
+            self.changed()
+
+    def scan(self):
+        if self.bluetooth != "on":
+            return self.error("bluetooth-off", "scan")
+        self.scan_active = True
+        self.scan_devices = []
+        self.changed()
+        for i, device in enumerate(NEARBY):
+            self.later(0.3 * (i + 1), lambda device=device: self.discover(device))
+        self.later(10.0, self.stop_scan)
+
+    def discover(self, device):
+        if not self.scan_active:
+            return
+        self.scan_devices.append(dict(device))
+        self.scan_devices.sort(key=lambda d: (not d["candidate"], -d["rssi"]))
+        self.changed()
+
+    def stop_scan(self):
+        if self.scan_active:
+            self.scan_active = False
+            self.changed()
+
+    def control(self, message):
+        if "bluetooth" in message:
+            self.bluetooth = message["bluetooth"]
+            if self.bluetooth != "on":
+                self.scan_active = False
+                self.drop_link(None)
+        if "linkDetail" in message:
+            self.drop_link(message["linkDetail"])
+        if "fastForwardS" in message and self.connected() and self.session:
+            self.walk(int(message["fastForwardS"]))
+        self.changed()
+
+    def handle(self, line):
+        try:
+            message = json.loads(line)
+        except ValueError:
+            return self.error("bad-command", None, "unreadable line")
+        if not isinstance(message, dict):
+            return self.error("bad-command", None, "not an object")
+        cmd = message.get("cmd")
+        if cmd == "configure":
+            if "weightKg" in message:
+                self.weight = float(max(20, min(300, message["weightKg"])))
+            self.changed()
+        elif cmd == "sync":
+            self.changed()
+            self.flush(True)
+        elif cmd == "wake":
+            if self.link == "disconnected" and self.device and self.detail != "paused":
+                self.search()
+        elif cmd == "scan":
+            self.scan()
+        elif cmd == "stopScan":
+            self.stop_scan()
+        elif cmd == "connect":
+            if message.get("address"):
+                self.device = {"address": message["address"], "name": message.get("name")}
+            if not self.device:
+                return self.error("no-device", cmd)
+            self.stop_scan()
+            self.search()
+        elif cmd == "disconnect":
+            self.drop_link("paused")
+        elif cmd == "forget":
+            self.drop_link(None)
+            self.device = None
+        elif cmd == "start":
+            self.start(cmd)
+        elif cmd == "stop":
+            self.stop(cmd)
+        elif cmd == "toggle":
+            if self.moving():
+                self.stop(cmd)
+            else:
+                self.start(cmd)
+        elif cmd in ("speed", "nudge"):
+            if not self.connected():
+                return self.error("not-connected", cmd)
+            base = 0.0 if cmd == "speed" else self.pad["targetKmh"]
+            self.set_target(base + float(message.get("kmh" if cmd == "speed" else "deltaKmh", 0)))
+        elif cmd == "stats":
+            reply = self.stats(message.get("period"), message.get("offset", 0))
+            if reply is None:
+                return self.error("bad-command", cmd, "unknown period")
+            reply["id"] = message.get("id")
+            emit(reply)
+        elif cmd == "mock":
+            self.control(message)
+        else:
+            self.error("bad-command", cmd, "unknown command")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] != "daemon":
+        sys.stderr.write("usage: mock-ks-fit daemon [--simulate]\n")
+        return 2
+    mock = Mock("--simulate" in args)
+    emit({"type": "hello", "version": manifest_version(), "simulated": mock.simulated})
+    stdin = sys.stdin.fileno()
+    pending = b""
+    last = time.monotonic()
+    next_second = last + 1.0
+    while True:
+        readable, _, _ = select.select([stdin], [], [], 0.05)
+        if readable:
+            chunk = os.read(stdin, 65536)
+            if not chunk:
+                return 0
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if line.strip():
+                    mock.handle(line.decode("utf-8", "replace"))
+        now = time.monotonic()
+        mock.run_timers()
+        mock.tick(now - last)
+        last = now
+        if now >= next_second:
+            next_second += 1.0
+            mock.second()
+        mock.flush()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
