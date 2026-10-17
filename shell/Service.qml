@@ -53,7 +53,10 @@ QtObject {
   readonly property var currentStats: statsRevision >= 0 ? statsFor(statsPeriod, statsOffset) : null
 
   property string notice: ""
-  property int openPanels: 0
+  // Open panels, at most one per monitor. Held by object so a panel that a hot
+  // reload destroys can take itself out (Component.onDestruction).
+  property var panels: []
+  readonly property int openPanels: panels.length
 
   property bool destroying: false
   property bool restarting: false
@@ -147,15 +150,14 @@ QtObject {
     refreshStats()
   }
 
-  // Reference-counted: a bar, and so a panel, exists per monitor.
-  function panelOpened() {
-    openPanels++
+  function panelOpened(panel) {
+    if (panel && panels.indexOf(panel) === -1) panels = panels.concat([panel])
     wake()
     refreshStats()
   }
 
-  function panelClosed() {
-    openPanels = Math.max(0, openPanels - 1)
+  function panelClosed(panel) {
+    panels = panels.filter(function(open) { return !!open && open !== panel })
   }
 
   function showNotice(text) {
