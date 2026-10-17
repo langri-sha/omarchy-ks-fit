@@ -463,6 +463,32 @@ async fn a_link_lost_while_the_belt_stops_reports_the_stop_as_not_acknowledged()
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lost_link_stays_reported_while_the_pad_is_searched_for() {
+    let mut shell = Shell::start();
+    shell.greeted().await;
+    shell.link().await;
+
+    shell.sim.set_advertising(false);
+    shell.sim.drop_link();
+    let searching = shell
+        .state("the pad is looked for", |s| s["link"] == "searching")
+        .await;
+    assert_eq!(searching["linkDetail"], "link-lost");
+    let missing = shell
+        .state("the search ends without the pad", |s| {
+            s["linkDetail"] == "not-found"
+        })
+        .await;
+    assert_eq!(missing["link"], "disconnected");
+
+    shell.sim.set_advertising(true);
+    let back = shell
+        .state("the pad is back", |s| s["link"] == "connected")
+        .await;
+    assert_eq!(back["linkDetail"], Value::Null);
+}
+
+#[tokio::test(start_paused = true)]
 async fn forgetting_the_pad_drops_the_link_and_stops_reconnecting() {
     let mut shell = Shell::start();
     shell.greeted().await;

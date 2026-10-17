@@ -785,7 +785,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Daemon<R, W> {
         log::info!("searching for {address}");
         self.radio.connect(&address, SEARCH);
         self.link = Link::Searching(address);
-        self.detail = None;
+        if self.detail != Some(Detail::LinkLost) {
+            self.detail = None;
+        }
         self.last_search = Some(now);
     }
 
