@@ -1,6 +1,8 @@
 import { Project } from '@langri-sha/projen-project'
+import { JsonFile, TextFile } from 'projen'
 
 const version = '0.1.0'
+const pluginId = 'io.github.langri-sha.ks-fit'
 
 const project = new Project({
   name: 'omarchy-ks-fit',
@@ -163,6 +165,66 @@ project.addSubproject({
     },
   },
 })
+
+new JsonFile(project, 'manifest.json', {
+  obj: {
+    schemaVersion: 1,
+    id: pluginId,
+    name: 'KS Fit',
+    version,
+    author: 'Filip Dupanović',
+    license: 'MIT',
+    description:
+      'Control a KingSmith WalkingPad from the bar and chart your steps and calories.',
+    kinds: ['service', 'bar-widget'],
+    keepLoaded: true,
+    entryPoints: {
+      service: 'shell/Service.qml',
+      barWidget: 'shell/BarWidget.qml',
+    },
+    barWidget: {
+      displayName: 'KS Fit',
+      description:
+        'WalkingPad control, live workout and step and calorie history',
+      category: 'Hardware',
+      allowMultiple: false,
+      defaultSection: 'center',
+      defaults: {
+        weightKg: 70,
+        demo: false,
+      },
+      schema: [
+        {
+          key: 'weightKg',
+          type: 'integer',
+          label: 'Body weight (kg)',
+          min: 20,
+          max: 300,
+          step: 1,
+          defaultValue: 70,
+        },
+        {
+          key: 'demo',
+          type: 'boolean',
+          label: 'Demo mode (simulated pad)',
+          defaultValue: false,
+        },
+      ],
+    },
+  },
+})
+
+// The service compares this with the manifest the shell hands it: after
+// `omarchy plugin update`, a kept service still runs the old QML.
+const versionFile = new TextFile(project, 'shell/Version.js')
+versionFile.addLine('.pragma library')
+versionFile.addLine(`// ${versionFile.marker}`)
+versionFile.addLine('')
+versionFile.addLine(`var version = "${version}"`)
+versionFile.addLine('')
+
+// Prettier can't parse the `.pragma library` line QML needs.
+project.prettier?.ignore.addPatterns('/shell/Version.js')
 
 project.package?.addField('private', true)
 project.package?.addField('packageManager', 'pnpm@12.8.2')
