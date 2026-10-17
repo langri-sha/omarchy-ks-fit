@@ -132,6 +132,15 @@ QtObject {
     return beltCommand(cmd) ? "ok" : "helper-" + helper
   }
 
+  // Writes the bar entry as `omarchy bar set` would, and tells the helper
+  // right away rather than waiting for the shell to hand the entry back.
+  function setWeight(kg) {
+    var value = Math.round(Model.coerceNumber(kg, weightKg, 20, 300))
+    if (shell && typeof shell.updateEntryInline === "function")
+      shell.updateEntryInline(pluginId, Model.withSetting(settings, "weightKg", value))
+    return send({ cmd: "configure", weightKg: value })
+  }
+
   // rfkill, like the shell's own Bluetooth panel: the daemon never changes
   // adapter power itself.
   function bluetoothOn() {

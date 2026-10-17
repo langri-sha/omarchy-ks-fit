@@ -840,3 +840,13 @@ test('errorText words the pad refusals', () => {
   assert.match(M.errorText({ code: 'imperial-units' }), /miles/)
   assert.match(M.errorText({ code: 'in-use' }), /Another app/)
 })
+
+test('withSetting copies the entry with one field changed', () => {
+  const entry = { id: 'io.github.langri-sha.ks-fit', demo: true, weightKg: 70 }
+  assert.deepEqual(plain(M.withSetting(entry, 'weightKg', 71)), {
+    demo: true,
+    weightKg: 71,
+  })
+  assert.deepEqual(entry.weightKg, 70)
+  assert.deepEqual(plain(M.withSetting(null, 'weightKg', 82)), { weightKg: 82 })
+})

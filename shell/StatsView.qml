@@ -49,18 +49,21 @@ Column {
       { name: "range", count: 2, columns: 2 }
     ]
     if (values.length > 0) list.push({ name: "chart", count: values.length, columns: values.length })
+    if (weightRow.visible) list.push({ name: "weight", count: 2, columns: 2 })
     return list.concat(pad.sections)
   }
 
   function selectPeriod(value) { if (service) service.selectPeriod(value) }
   function selectMetric(value) { if (service) service.selectMetric(value) }
   function shiftRange(delta) { if (service) service.shiftRange(delta) }
+  function adjustWeight(delta) { if (service) service.setWeight(Math.round(service.weightKg) + delta) }
 
   function activate(section, index, byArrows) {
     switch (section) {
       case "period": selectPeriod(periods[index].value); break
       case "metric": selectMetric(metrics[index].value); break
       case "range": shiftRange(index === 0 ? -1 : 1); break
+      case "weight": adjustWeight(index === 0 ? -1 : 1); break
       default: pad.activate(section, index, byArrows)
     }
   }
@@ -258,13 +261,44 @@ Column {
       wrapMode: Text.WordWrap
     }
 
-    Text {
-      textFormat: Text.PlainText
-      visible: root.metric === "calories"
-      text: Model.weightHint(root.service ? root.service.weightKg : 70)
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
+    Row {
+      id: weightRow
+      visible: root.metric === "calories" && Model.hasActivity(root.stats)
+      spacing: Style.space(6)
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.verticalCenter: parent.verticalCenter
+        text: Model.weightHint(root.service ? root.service.weightKg : 70)
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Repeater {
+        model: [
+          { icon: Model.glyphs.minus, tip: "Lighter", delta: -1, enabled: !!root.service && root.service.weightKg > 20 },
+          { icon: Model.glyphs.plus, tip: "Heavier", delta: 1, enabled: !!root.service && root.service.weightKg < 300 }
+        ]
+
+        Button {
+          required property var modelData
+          required property int index
+          iconText: modelData.icon
+          iconSize: Style.font.caption
+          tooltipText: modelData.tip
+          horizontalPadding: Style.spacing.sm
+          verticalPadding: Style.spacing.xxs
+          bordered: true
+          enabled: modelData.enabled
+          opacity: enabled ? 1 : 0.4
+          hasCursor: root.panel.hasCursor("weight", index)
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onHovered: function(on) { root.panel.hoverCursor("weight", index, on) }
+          onClicked: root.adjustWeight(modelData.delta)
+        }
+      }
     }
   }
 

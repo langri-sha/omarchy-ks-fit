@@ -79,6 +79,15 @@ function configureCommand(entry) {
   return weight > 0 ? { cmd: 'configure', weightKg: weight } : null
 }
 
+// The bar entry's fields with one changed, for shell.updateEntryInline,
+// which replaces the whole entry.
+function withSetting(entry, key, value) {
+  var out = {}
+  for (var k in entry || {}) if (k !== 'id') out[k] = entry[k]
+  out[key] = value
+  return out
+}
+
 // What calories are estimated for: the daemon's value once it reports one.
 function weightFor(state, entryWeight) {
   var reported = state ? Number(state.weightKg) : NaN
