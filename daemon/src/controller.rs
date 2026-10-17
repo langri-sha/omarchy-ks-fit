@@ -19,6 +19,7 @@ const STOP_PROGRESS: Duration = Duration::from_secs(3);
 const SPEED_WAIT: Duration = Duration::from_secs(4);
 const SPEED_SENDS: u8 = 3;
 const REMOTE_SETTLE: Duration = Duration::from_secs(3);
+const NUDGE_LEAD_DKMH: u8 = 5;
 const MIN_DKMH: u8 = 5;
 const FALLBACK_MAX_DKMH: u8 = 60;
 
@@ -327,10 +328,10 @@ impl Controller {
                     Ok(())
                 }
             }
-            Request::SetTarget(kmh) => self.steer(&status, tenths(kmh)?, actions),
+            Request::SetTarget(kmh) => self.steer(&status, tenths(kmh)?, false, actions),
             Request::Nudge(delta) => {
                 let dkmh = tenths(kmh(self.target) + delta)?;
-                self.steer(&status, dkmh, actions)
+                self.steer(&status, dkmh, delta > 0.0, actions)
             }
         }
     }
@@ -370,10 +371,16 @@ impl Controller {
         &mut self,
         status: &Status,
         dkmh: u8,
+        nudging_up: bool,
         actions: &mut Vec<Action>,
     ) -> Result<(), Failure> {
         if status.mode == Mode::Auto {
             return Err(Failure::AutoMode);
+        }
+        let moving = matches!(status.belt, Belt::Starting | Belt::Running);
+        let trailing = self.target.saturating_sub(status.speed_dkmh) >= NUDGE_LEAD_DKMH;
+        if nudging_up && moving && trailing {
+            return Err(Failure::Busy);
         }
         self.set_target(dkmh, true, actions);
         if matches!(self.op, None | Some(Op::Speed(_))) {
@@ -1404,6 +1411,28 @@ mod tests {
         );
         assert_eq!(bench.failures().len(), 4);
         assert_eq!(bench.view().target_kmh, 4.0);
+    }
+
+    #[test]
+    fn nudging_up_is_refused_while_the_belt_trails_the_target() {
+        let mut bench = Bench::stubborn(running(20));
+        bench.request(Request::SetTarget(4.0));
+        bench.request(Request::Nudge(0.5));
+        bench.request(Request::Nudge(-0.5));
+        assert_eq!(bench.failures(), [(Request::Nudge(0.5), Failure::Busy)]);
+        assert_eq!(bench.view().target_kmh, 3.5);
+        bench.set_pad(running(34));
+        bench.run(secs(2));
+        bench.request(Request::Nudge(0.5));
+        assert_eq!(bench.view().target_kmh, 4.0);
+        assert_eq!(bench.failures().len(), 1);
+    }
+
+    #[test]
+    fn nudging_up_is_refused_during_the_countdown() {
+        let mut bench = Bench::stubborn(counting_down());
+        bench.request(Request::Nudge(0.5));
+        assert_eq!(bench.failures(), [(Request::Nudge(0.5), Failure::Busy)]);
     }
 
     #[test]
