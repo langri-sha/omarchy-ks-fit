@@ -187,7 +187,7 @@ QtObject {
     if (helperVersion !== Version.version) {
       console.warn("ks-fit: helper " + helperVersion + " doesn't match the plugin's " + Version.version)
       helper = "outdated"
-      helperProcess.running = false
+      stopHelper()
       return
     }
     helper = "ready"
@@ -220,11 +220,30 @@ QtObject {
   function startHelper() {
     if (destroying || helperProcess.running) return
     lastStderr = ""
+    helperProcess.stdinEnabled = true
     helperProcess.running = true
+  }
+
+  // Closing stdin lets the helper shut down on its own terms; SIGTERM only
+  // if it hasn't within 3 s.
+  function stopHelper() {
+    if (!helperProcess.running) return
+    helperProcess.stdinEnabled = false
+    stopTimer.restart()
+  }
+
+  function restartHelper() {
+    if (!helperProcess.running) {
+      startHelper()
+      return
+    }
+    restarting = true
+    stopHelper()
   }
 
   function helperStopped() {
     uptimeTimer.stop()
+    stopTimer.stop()
     state = null
     if (destroying) return
     if (restarting) {
@@ -254,9 +273,7 @@ QtObject {
   function retryHelper() {
     if (stale || helper === "ready") return
     if (helperProcess.running) {
-      if (helper === "starting") return
-      restarting = true
-      helperProcess.running = false
+      if (helper !== "starting") restartHelper()
       return
     }
     if (helper === "failed") helper = "starting"
@@ -291,6 +308,11 @@ QtObject {
     onTriggered: root.startHelper()
   }
 
+  readonly property Timer stopTimer: Timer {
+    interval: 3000
+    onTriggered: if (root.helperProcess.running) root.helperProcess.running = false
+  }
+
   readonly property Timer uptimeTimer: Timer {
     interval: 30000
     onTriggered: root.attempts = 0
@@ -311,11 +333,7 @@ QtObject {
   onWeightKgChanged: configure()
 
   // Injection fires this before the deferred start, while nothing runs yet.
-  onDemoChanged: {
-    if (!helperProcess.running) return
-    restarting = true
-    helperProcess.running = false
-  }
+  onDemoChanged: if (helperProcess.running) restartHelper()
 
   // The shell assigns shell and manifest right after createObject().
   Component.onCompleted: Qt.callLater(startHelper)
