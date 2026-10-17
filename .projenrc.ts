@@ -22,6 +22,7 @@ const project = new Project({
     repository: 'langri-sha/omarchy-ks-fit',
     type: 'module',
 
+    autoDetectBin: false,
     entrypoint: '',
     devDeps: ['@langri-sha/lint-staged@0.9.9', '@langri-sha/prettier@0.4.10'],
   },
