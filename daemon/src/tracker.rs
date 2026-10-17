@@ -106,6 +106,10 @@ impl Tracker {
         &self.store
     }
 
+    pub fn time_zone(&self) -> &TimeZone {
+        &self.tz
+    }
+
     pub fn weight_kg(&self) -> f64 {
         self.weight_kg
     }
