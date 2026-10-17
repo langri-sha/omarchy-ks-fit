@@ -25,6 +25,9 @@ const GATT_TIMEOUT: Duration = Duration::from_secs(20);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// rfkill and bluetoothd going away raise no event, so the adapter is polled too.
 const CHECK_EVERY: Duration = Duration::from_secs(2);
+/// A busy bluetoothd can miss a probe's deadline while the link is fine, so
+/// it takes this many unanswered probes in a row to call it unavailable.
+const UNANSWERED_PROBES: u8 = 2;
 
 pub(super) fn spawn(
     calls: mpsc::UnboundedReceiver<Call>,
@@ -47,6 +50,63 @@ impl Fault {
     }
 }
 
+/// What one look at the adapter found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Probe {
+    Answered(AdapterState),
+    /// BlueZ did not answer in time, or failed without saying anything
+    /// about the adapter.
+    Unanswered,
+    /// The system bus connection is gone.
+    Lost,
+}
+
+impl Probe {
+    fn failed(fault: &Fault) -> Probe {
+        if fault.is(&ErrorKind::Internal(InternalErrorKind::DBusConnectionLost)) {
+            Probe::Lost
+        } else {
+            Probe::Unanswered
+        }
+    }
+}
+
+/// The adapter state as the probes tell it.
+#[derive(Debug, Default)]
+struct Health {
+    state: Option<AdapterState>,
+    unanswered: u8,
+}
+
+impl Health {
+    /// Takes in a probe, returning the adapter state when it changes. An
+    /// unanswered probe keeps a known state until [`UNANSWERED_PROBES`] in
+    /// a row.
+    fn update(&mut self, probe: Probe) -> Option<AdapterState> {
+        let state = match probe {
+            Probe::Answered(state) => {
+                self.unanswered = 0;
+                state
+            }
+            Probe::Lost => {
+                self.unanswered = 0;
+                AdapterState::Unavailable
+            }
+            Probe::Unanswered => {
+                self.unanswered = self.unanswered.saturating_add(1);
+                if self.state.is_some() && self.unanswered < UNANSWERED_PROBES {
+                    return None;
+                }
+                AdapterState::Unavailable
+            }
+        };
+        (self.state != Some(state)).then(|| {
+            self.state = Some(state);
+            state
+        })
+    }
+}
+
 async fn bounded<T>(
     limit: Duration,
     call: impl Future<Output = bluer::Result<T>>,
@@ -64,7 +124,7 @@ struct Bluez {
     session_events: Option<BoxStream<'static, SessionEvent>>,
     adapter: Option<Adapter>,
     adapter_events: Option<BoxStream<'static, AdapterEvent>>,
-    state: Option<AdapterState>,
+    health: Health,
     /// One discovery session shared by user scans and connect searches.
     discovery: Option<BoxStream<'static, AdapterEvent>>,
     scan_until: Option<Instant>,
@@ -112,7 +172,7 @@ impl Bluez {
             session_events: None,
             adapter: None,
             adapter_events: None,
-            state: None,
+            health: Health::default(),
             discovery: None,
             scan_until: None,
             search: None,
@@ -188,7 +248,7 @@ impl Bluez {
             return;
         };
         let device = match &self.adapter {
-            Some(adapter) if self.state == Some(AdapterState::On) => adapter.device(parsed),
+            Some(adapter) if self.health.state == Some(AdapterState::On) => adapter.device(parsed),
             _ => {
                 self.emit(failed(ConnectFailure::Failed));
                 return;
@@ -275,7 +335,7 @@ impl Bluez {
         let Some(adapter) = self
             .adapter
             .as_ref()
-            .filter(|_| self.state == Some(AdapterState::On))
+            .filter(|_| self.health.state == Some(AdapterState::On))
         else {
             return false;
         };
@@ -436,7 +496,7 @@ impl Bluez {
                 // bluetoothd restarted: every object it handed out is gone.
                 log::warn!("{name} was registered again");
                 self.reset("Bluetooth restarted");
-                self.state = None;
+                self.health = Health::default();
             }
             Some(SessionEvent::AdapterRemoved(name)) if self.is_current(&name) => {
                 self.adapter = None;
@@ -469,19 +529,18 @@ impl Bluez {
     }
 
     async fn refresh(&mut self) {
-        let state = self.probe().await;
-        if self.state == Some(state) {
+        let probe = self.probe().await;
+        let Some(state) = self.health.update(probe) else {
             return;
-        }
+        };
         log::info!("Bluetooth is {state:?}");
         if state != AdapterState::On {
             self.reset("Bluetooth is not on");
         }
-        self.state = Some(state);
         self.emit(RadioEvent::Adapter(state));
     }
 
-    async fn probe(&mut self) -> AdapterState {
+    async fn probe(&mut self) -> Probe {
         if self.session.is_none() {
             match bounded(CALL_TIMEOUT, Session::new()).await {
                 Ok(session) => {
@@ -493,12 +552,12 @@ impl Bluez {
                 }
                 Err(fault) => {
                     log::debug!("no system bus: {fault}");
-                    return AdapterState::Unavailable;
+                    return Probe::Lost;
                 }
             }
         }
         let Some(session) = &self.session else {
-            return AdapterState::Unavailable;
+            return Probe::Lost;
         };
         if self.adapter.is_none() {
             match bounded(CALL_TIMEOUT, session.default_adapter()).await {
@@ -509,32 +568,37 @@ impl Bluez {
                         .map(StreamExt::boxed);
                     self.adapter = Some(adapter);
                 }
-                Err(fault) if fault.is(&ErrorKind::NotFound) => return missing(),
-                Err(fault) => return self.unavailable(fault),
+                Err(fault) if fault.is(&ErrorKind::NotFound) => {
+                    return Probe::Answered(missing());
+                }
+                Err(fault) => return self.unanswered(&fault),
             }
         }
         let Some(adapter) = &self.adapter else {
-            return AdapterState::Unavailable;
+            return Probe::Unanswered;
         };
         match bounded(CALL_TIMEOUT, adapter.is_powered()).await {
-            Ok(true) => AdapterState::On,
-            Ok(false) if rfkill::adapter_blocked(adapter.name()) => AdapterState::Blocked,
-            Ok(false) => AdapterState::Off,
+            Ok(true) => Probe::Answered(AdapterState::On),
+            Ok(false) if rfkill::adapter_blocked(adapter.name()) => {
+                Probe::Answered(AdapterState::Blocked)
+            }
+            Ok(false) => Probe::Answered(AdapterState::Off),
             Err(fault) if fault.is(&ErrorKind::NotFound) => {
                 self.adapter = None;
                 self.adapter_events = None;
-                missing()
+                Probe::Answered(missing())
             }
-            Err(fault) => self.unavailable(fault),
+            Err(fault) => self.unanswered(&fault),
         }
     }
 
-    fn unavailable(&mut self, fault: Fault) -> AdapterState {
-        log::debug!("bluetoothd is unreachable: {fault}");
-        if fault.is(&ErrorKind::Internal(InternalErrorKind::DBusConnectionLost)) {
+    fn unanswered(&mut self, fault: &Fault) -> Probe {
+        log::debug!("bluetoothd did not answer: {fault}");
+        let probe = Probe::failed(fault);
+        if probe == Probe::Lost {
             self.forget_session();
         }
-        AdapterState::Unavailable
+        probe
     }
 
     fn forget_session(&mut self) {
@@ -689,5 +753,84 @@ async fn link_event(link: &mut Option<Link>) -> LinkEvent {
                 None => return LinkEvent::Lost("the pad went away"),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use AdapterState::{Off, On, Unavailable};
+    use Probe::{Answered, Lost, Unanswered};
+
+    fn changes(probes: &[Probe]) -> Vec<Option<AdapterState>> {
+        let mut health = Health::default();
+        probes.iter().map(|probe| health.update(*probe)).collect()
+    }
+
+    #[test]
+    fn one_unanswered_probe_keeps_the_adapter_on() {
+        assert_eq!(
+            changes(&[Answered(On), Unanswered, Answered(On)]),
+            [Some(On), None, None]
+        );
+    }
+
+    #[test]
+    fn two_unanswered_probes_in_a_row_make_bluetooth_unavailable() {
+        assert_eq!(
+            changes(&[Answered(On), Unanswered, Unanswered, Unanswered]),
+            [Some(On), None, Some(Unavailable), None]
+        );
+    }
+
+    #[test]
+    fn an_answer_between_unanswered_probes_starts_the_count_over() {
+        assert_eq!(
+            changes(&[Answered(On), Unanswered, Answered(On), Unanswered]),
+            [Some(On), None, None, None]
+        );
+    }
+
+    #[test]
+    fn a_lost_bus_makes_bluetooth_unavailable_at_once() {
+        assert_eq!(
+            changes(&[Answered(On), Lost]),
+            [Some(On), Some(Unavailable)]
+        );
+    }
+
+    #[test]
+    fn an_unanswered_first_probe_has_no_state_to_keep() {
+        assert_eq!(changes(&[Unanswered]), [Some(Unavailable)]);
+    }
+
+    #[test]
+    fn an_answer_changes_the_state_at_once() {
+        assert_eq!(
+            changes(&[Answered(On), Answered(Off), Answered(On)]),
+            [Some(On), Some(Off), Some(On)]
+        );
+    }
+
+    #[test]
+    fn a_timeout_leaves_the_adapter_state_unknown() {
+        assert_eq!(Probe::failed(&Fault::TimedOut), Unanswered);
+    }
+
+    #[test]
+    fn a_lost_dbus_connection_is_lost_and_other_errors_unanswered() {
+        let fault = |kind| {
+            Fault::Bluez(bluer::Error {
+                kind,
+                message: String::new(),
+            })
+        };
+        assert_eq!(
+            Probe::failed(&fault(ErrorKind::Internal(
+                InternalErrorKind::DBusConnectionLost
+            ))),
+            Lost
+        );
+        assert_eq!(Probe::failed(&fault(ErrorKind::Failed)), Unanswered);
     }
 }
