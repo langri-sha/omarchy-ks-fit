@@ -108,10 +108,6 @@ QtObject {
     return send({ cmd: cmd }) ? "ok" : "helper-" + helper
   }
 
-  function setMode(mode) {
-    return mode === "manual" || mode === "auto" ? send({ cmd: "mode", mode: mode }) : false
-  }
-
   // rfkill, like the shell's own Bluetooth panel: the daemon never changes
   // adapter power itself.
   function bluetoothOn() {
