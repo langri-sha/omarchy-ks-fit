@@ -1,0 +1,65 @@
+name: Plugin
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  # The Omarchy revision whose plugin rules and shell the plugin is checked
+  # against. Bump it deliberately, to pick up upstream changes to either.
+  OMARCHY_REVISION: 035ce29f03bdd97a09af80ef5f2d22d7a98930d6
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate the plugin
+        run: |
+          validate=$RUNNER_TEMP/omarchy-plugin-validate
+          curl --fail --silent --show-error --location --output "$validate" \
+            "https://raw.githubusercontent.com/omacom/omarchy/$OMARCHY_REVISION/bin/omarchy-plugin-validate"
+          chmod +x "$validate"
+          OMARCHY_PLUGIN_VALIDATE=$validate scripts/validate-plugin.sh
+
+  model:
+    name: Model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PNPM
+        uses: langri-sha/github/actions/pnpm@v0.23.0
+
+      - name: Test
+        run: node --test 'tests/**/*.test.js'
+
+  qml:
+    name: QML
+    runs-on: ubuntu-latest
+    # Quickshell's QML modules are packaged for Arch, as on Omarchy itself.
+    container: archlinux:latest
+
+    steps:
+      - name: Install Quickshell and Qt
+        run: pacman -Syu --noconfirm --needed git quickshell qt6-declarative
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout Omarchy
+        run: |
+          git init --quiet "$RUNNER_TEMP/omarchy"
+          git -C "$RUNNER_TEMP/omarchy" fetch --quiet --depth 1 https://github.com/omacom/omarchy "$OMARCHY_REVISION"
+          git -C "$RUNNER_TEMP/omarchy" checkout --quiet FETCH_HEAD
+
+      - name: Lint
+        run: OMARCHY_PATH=$RUNNER_TEMP/omarchy scripts/qmllint.sh
