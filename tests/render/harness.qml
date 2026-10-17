@@ -435,6 +435,38 @@ ShellRoot {
       }
     },
     {
+      name: "late click on stop",
+      until: function() { return !service.mayBeMoving && card.content.view === "stats" && !!findButton(card.content, "Start ·") },
+      run: function(done) {
+        var start = findButton(card.content, "Start ·")
+        if (Date.now() - service.stoppedAt >= 3000) fail("the belt came to rest too long ago to check the hold")
+        else if (start.enabled) fail("Start was live as soon as the belt came to rest")
+        else {
+          start.clicked()
+          done()
+        }
+      }
+    },
+    {
+      name: "late click left the belt alone",
+      settle: 1000,
+      run: function(done) {
+        if (service.exercising) fail("a late click on Stop started the belt")
+        done()
+      }
+    },
+    {
+      name: "start back after the hold",
+      until: function() {
+        var start = findButton(card.content, "Start ·")
+        return !!start && start.enabled
+      },
+      run: function(done) {
+        if (Date.now() - service.stoppedAt < 2900) fail("Start came back before the hold ran out")
+        done()
+      }
+    },
+    {
       name: "stopped",
       until: function() { return !service.exercising && !!snapshot().lastSession && card.content.view === "stats" },
       settle: 500,

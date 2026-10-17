@@ -30,6 +30,10 @@ var speedStep = 0.5
 var barSample = '00:00 · 0,000'
 var periods = ['day', 'week', 'month', 'year']
 var backoffSteps = [1000, 2000, 5000, 15000, 30000]
+// How long Start stays off once the belt comes to rest: the pad row swaps the
+// full-width Stop for one with Start under the pointer, and a late second
+// click on Stop must not land on it.
+var startHoldMs = 3000
 
 function coerceBool(value, fallback) {
   if (typeof value === 'boolean') return value
@@ -643,8 +647,10 @@ function speedRange(state) {
 }
 
 // The pad row's buttons, by link and belt state. Start never appears for a
-// belt that moves, and every stop path stays available while connected.
-function padActions(state) {
+// belt that moves, stays off until startHoldMs after the belt came to rest
+// (`stoppedAt` and `now` in ms), and every stop path stays available while
+// connected.
+function padActions(state, stoppedAt, now) {
   if (!state) return []
   if (state.bluetooth === 'off' || state.bluetooth === 'blocked')
     return [{ id: 'bluetoothOn', label: 'Turn on', icon: glyphs.bluetooth }]
@@ -662,7 +668,9 @@ function padActions(state) {
       return [{ id: 'stop', label: 'Stop', icon: glyphs.stop, primary: true }]
     var range = speedRange(state)
     var pad = state.pad
-    var startable = !pad.busy && pad.imperial !== true && pad.shared !== true
+    var held = Number(now) - Number(stoppedAt) < startHoldMs
+    var startable =
+      !held && !pad.busy && pad.imperial !== true && pad.shared !== true
     return [
       { id: 'slower', icon: glyphs.minus, enabled: range.slower },
       {

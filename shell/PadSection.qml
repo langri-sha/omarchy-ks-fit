@@ -18,7 +18,7 @@ Column {
   readonly property color dim: panel.dim
   readonly property string fontFamily: panel.fontFamily
 
-  readonly property var actions: Model.padActions(snapshot)
+  readonly property var actions: Model.padActions(snapshot, service ? service.stoppedAt : 0, service ? service.clock : 0)
   readonly property bool choosing: !!snapshot && snapshot.bluetooth === "on" && !snapshot.device
   property bool showAll: false
   readonly property var scan: Model.scanRows(snapshot, showAll)
