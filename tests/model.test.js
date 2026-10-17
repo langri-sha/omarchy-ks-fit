@@ -477,6 +477,17 @@ test('stopFailed singles out stops the pad did not carry out while the belt may 
   assert.ok(M.stopFailureText.includes('remote'))
 })
 
+test('stopFailed counts a toggle the pad never got as a stop', () => {
+  assert.equal(
+    M.stopFailed({ code: 'not-connected', cmd: 'toggle' }, true),
+    true,
+  )
+  assert.equal(
+    M.stopFailed({ code: 'not-connected', cmd: 'toggle' }, false),
+    false,
+  )
+})
+
 test('stopFailed raises no alarm for a belt last seen at rest', () => {
   assert.equal(
     M.stopFailed({ code: 'not-connected', cmd: 'stop' }, false),
@@ -954,6 +965,29 @@ test('ipcPlan sends whenever a helper listens and alarms on undeliverable stops'
     stopFailed: false,
   })
   assert.equal(M.ipcPlan('ready', true, running, 'toggle', true).reply, 'ok')
+})
+
+test('ipcPlan takes a toggle for a stop while the belt may be moving', () => {
+  const lost = state({
+    link: 'disconnected',
+    linkDetail: 'link-lost',
+    pad: null,
+  })
+  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'toggle', true)), {
+    send: false,
+    reply: 'helper-starting',
+    stopFailed: true,
+  })
+  assert.deepEqual(plain(M.ipcPlan('ready', true, lost, 'toggle', true)), {
+    send: true,
+    reply: 'not-connected',
+    stopFailed: false,
+  })
+  assert.deepEqual(plain(M.ipcPlan('starting', false, null, 'toggle', false)), {
+    send: false,
+    reply: 'helper-starting',
+    stopFailed: false,
+  })
 })
 
 test('ipcPlan raises no alarm for an undeliverable stop to a belt last seen at rest', () => {

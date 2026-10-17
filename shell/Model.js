@@ -256,7 +256,7 @@ function beltBlocker(helper, state, cmd) {
 // asks for the alarm when a stop can't be delivered at all while the belt may
 // be moving.
 function ipcPlan(helper, listening, state, cmd, moving) {
-  var effective = cmd === 'toggle' ? (exercising(state) ? 'stop' : 'start') : cmd
+  var effective = cmd === 'toggle' ? (moving === true ? 'stop' : 'start') : cmd
   var reachable = helper === 'ready' && !!listening
   var blocker = beltBlocker(helper, state, effective)
   return {
@@ -288,14 +288,15 @@ function sessionMark(state) {
 var stopFailureText = "KS Fit couldn't stop the belt — use the remote"
 
 // A stop the pad didn't carry out while the belt may be moving (`moving`, the
-// service's latch): someone may still be walking. With the belt last seen at
-// rest, such as before the helper is up at boot, it is no alarm.
+// service's latch): someone may still be walking. A toggle then is a stop. With
+// the belt last seen at rest, such as before the helper is up at boot, it is
+// no alarm.
 function stopFailed(message, moving) {
   var m = message || {}
   return (
     moving === true &&
     (m.code === 'stop-not-acknowledged' ||
-      (m.code === 'not-connected' && m.cmd === 'stop'))
+      (m.code === 'not-connected' && (m.cmd === 'stop' || m.cmd === 'toggle')))
   )
 }
 
