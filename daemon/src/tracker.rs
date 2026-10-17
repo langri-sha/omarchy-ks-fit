@@ -316,19 +316,17 @@ fn credit(device: &str, baseline: Option<Baseline>, reading: Counters, now: Time
     }
 }
 
-/// What the counters advanced by since `base`, everything since zero when
-/// the pad has reset.
+/// What the counters advanced by since `base`: everything since zero when
+/// the time counter dropped, as the pad has reset, while distance or steps
+/// dropping on their own re-base without credit.
 fn delta(base: Counters, reading: Counters) -> Counters {
-    if reading.time_s < base.time_s
-        || reading.dist_10m < base.dist_10m
-        || reading.steps < base.steps
-    {
+    if reading.time_s < base.time_s {
         return reading;
     }
     Counters {
         time_s: reading.time_s - base.time_s,
-        dist_10m: reading.dist_10m - base.dist_10m,
-        steps: reading.steps - base.steps,
+        dist_10m: reading.dist_10m.saturating_sub(base.dist_10m),
+        steps: reading.steps.saturating_sub(base.steps),
     }
 }
 
@@ -525,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn a_counter_below_its_baseline_means_the_pad_reset() {
+    fn a_dropped_time_counter_means_the_pad_reset() {
         let mut tracker = tracker_at(at("10:00:00"));
         feed(
             &mut tracker,
@@ -535,6 +533,21 @@ mod tests {
             ],
         );
         assert_eq!(integers(tracker.session().unwrap().activity), (4, 8, 10));
+    }
+
+    #[test]
+    fn distance_or_steps_dropping_alone_re_base_without_credit() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(100, 50, 200)),
+                (at("10:00:01"), walking(101, 10, 100)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (1, 0, 0));
+        feed(&mut tracker, &[(at("10:00:02"), walking(102, 11, 102))]);
+        assert_eq!(integers(tracker.today().activity), (2, 2, 10));
     }
 
     #[test]
