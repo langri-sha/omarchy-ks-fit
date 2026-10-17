@@ -351,3 +351,43 @@ test('glyphs are Material Design code points', () => {
   }
   assert.equal(M.glyphs.walk, '\u{F0583}')
 })
+
+test('beltBlocker lets stop through on any link and gates start', () => {
+  assert.equal(M.beltBlocker('ready', state(), 'start'), '')
+  assert.equal(M.beltBlocker('ready', state(), 'stop'), '')
+  assert.equal(M.beltBlocker('missing', state(), 'stop'), 'helper-missing')
+  assert.equal(M.beltBlocker('starting', null, 'start'), 'helper-starting')
+  assert.equal(M.beltBlocker('ready', null, 'stop'), 'not-connected')
+  assert.equal(
+    M.beltBlocker(
+      'ready',
+      state({ bluetooth: 'blocked', link: 'disconnected', pad: null }),
+      'stop',
+    ),
+    'bluetooth-off',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ link: 'searching', pad: null }), 'start'),
+    'not-connected',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ pad: pad({ busy: 'stopping' }) }), 'start'),
+    'busy',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ pad: pad({ busy: 'stopping' }) }), 'stop'),
+    '',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ pad: pad({ imperial: true }) }), 'start'),
+    'imperial-units',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ pad: pad({ shared: true }) }), 'start'),
+    'in-use',
+  )
+  assert.equal(
+    M.beltBlocker('ready', state({ pad: pad({ belt: 'running' }) }), 'start'),
+    '',
+  )
+})

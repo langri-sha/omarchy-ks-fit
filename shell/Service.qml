@@ -99,6 +99,15 @@ QtObject {
     return isFinite(delta) && delta !== 0 ? send({ cmd: "nudge", deltaKmh: delta }) : false
   }
 
+  // IPC answers right away, so it can only report what the cached state
+  // already rules out; the daemon's own refusals arrive as `notice`.
+  function ipcBelt(cmd) {
+    var effective = cmd === "toggle" ? (exercising ? "stop" : "start") : cmd
+    var blocker = Model.beltBlocker(helper, state, effective)
+    if (blocker !== "") return blocker
+    return send({ cmd: cmd }) ? "ok" : "helper-" + helper
+  }
+
   function setMode(mode) {
     return mode === "manual" || mode === "auto" ? send({ cmd: "mode", mode: mode }) : false
   }
@@ -321,9 +330,9 @@ QtObject {
   readonly property IpcHandler ipc: IpcHandler {
     target: "io.github.langri-sha.ks-fit"
 
-    function start(): void { root.start() }
-    function stop(): void { root.stop() }
-    function toggle(): void { root.toggleBelt() }
+    function start(): string { return root.ipcBelt("start") }
+    function stop(): string { return root.ipcBelt("stop") }
+    function toggle(): string { return root.ipcBelt("toggle") }
     function faster(): void { root.nudge(Model.speedStep) }
     function slower(): void { root.nudge(-Model.speedStep) }
     function speed(kmh: real): void { root.setSpeed(kmh) }
