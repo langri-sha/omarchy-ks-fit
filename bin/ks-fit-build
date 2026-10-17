@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Builds the helper from the source that ships with the plugin and puts it
+# where bin/ks-fit-launcher looks. Everything is written outside the plugin
+# directory: the shell reloads every plugin on any write inside it.
+set -euo pipefail
+
+if ((EUID == 0)); then
+  echo 'Run this as your own user, not as root.' >&2
+  exit 1
+fi
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+version=$(jq -r .version "$root/manifest.json")
+data=${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-ks-fit
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-ks-fit
+
+cargo=$(command -v cargo || true)
+if [[ -z $cargo && -x $HOME/.cargo/bin/cargo ]]; then
+  cargo=$HOME/.cargo/bin/cargo
+fi
+if [[ -z $cargo ]]; then
+  echo 'Building the KS Fit helper needs Rust (cargo): run `omarchy install dev-env rust`, then this again.' >&2
+  exit 1
+fi
+
+echo "Building the KS Fit helper $version"
+"$cargo" build --release --locked --manifest-path "$root/Cargo.toml" \
+  --package ks-fit --target-dir "$cache/target"
+
+dest=$data/helpers/$version
+mkdir -p "$dest"
+chmod 700 "$data" "$data/helpers" "$dest"
+staged=$(mktemp "$dest/.ks-fit.XXXXXX")
+cp "$cache/target/release/ks-fit" "$staged"
+chmod 755 "$staged"
+# A running helper keeps its old inode.
+mv -f -T "$staged" "$dest/ks-fit"
+
+# Keep only the helper for this version.
+for old in "$data/helpers"/*/; do
+  old=${old%/}
+  if [[ $old != "$dest" ]]; then
+    rm -f -- "$old/ks-fit"
+    rmdir -- "$old" 2>/dev/null || true
+  fi
+done
+
+echo "Built $dest/ks-fit"

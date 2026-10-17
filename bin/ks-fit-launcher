@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Starts the helper for the plugin's service. Quickshell kills a stopped
+# Process's direct child outright, so the helper runs as this script's child
+# instead: it then reads EOF on stdin and shuts down cleanly, without touching
+# the belt.
+set -euo pipefail
+
+if ((EUID == 0)); then
+  echo 'ks-fit-launcher: refusing to run as root' >&2
+  exit 1
+fi
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+version=$(jq -r .version "$root/manifest.json")
+helpers=${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-ks-fit/helpers
+helper=${KS_FIT_HELPER:-$helpers/$version/ks-fit}
+
+if [[ ! -x $helper ]]; then
+  code=helper-missing
+  # A helper built for another version means the plugin was updated.
+  if [[ -z ${KS_FIT_HELPER:-} ]] && compgen -G "$helpers/*/ks-fit" >/dev/null; then
+    code=helper-outdated
+  fi
+  jq -cn --arg code "$code" --arg version "$version" --arg message "No KS Fit helper at $helper" \
+    '{type: "fatal", code: $code, version: $version, message: $message}'
+  exit 127
+fi
+
+"$helper" daemon "$@" <&0 &
+wait $!
