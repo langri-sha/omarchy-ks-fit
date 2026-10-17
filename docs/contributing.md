@@ -51,8 +51,9 @@ cargo clippy --locked --all-targets -- -D warnings
   `omarchy-notification-send` are stubbed on `PATH`, and a call to any of them
   fails the run.
 - `KS_FIT_RENDER_HELPER=target/debug/ks-fit pnpm plugin:render` drives the real
-  helper instead, in demo mode and with its data under a temp dir; the steps
-  that need the mock's `{"cmd":"mock",…}` controls are skipped.
+  helper instead, in demo mode and with its data and `XDG_RUNTIME_DIR` under a
+  temp dir, so its lock can't collide with a live shell's; the steps that need
+  the mock's `{"cmd":"mock",…}` controls are skipped.
 
 ## How it fits together
 
