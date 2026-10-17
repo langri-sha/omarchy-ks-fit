@@ -153,11 +153,21 @@ impl Tracker {
             self.unconfirmed = Some((device.to_owned(), reading));
             return Ok(());
         };
+        let untimed = untimed(delta, baseline, now);
+        let closing = if untimed {
+            log::info!("{device}: {delta:?} happened at an unknown time; estimating its session");
+            self.closing()
+        } else {
+            None
+        };
         let kcal = energy(delta, sample.speed_kmh(), self.weight_kg);
         let shares = shares(delta, kcal, now)?;
-        let mut next = self.advance(delta, &shares, sample, now)?;
+        let mut next = self.advance(delta, &shares, sample, untimed, now)?;
 
         let tx = self.store.transaction()?;
+        if let Some(closed) = &closing {
+            self.store.update_session(closed)?;
+        }
         self.store.set_baseline(device, reading, now)?;
         for (at, share) in &shares {
             self.store.add_minute(*at, share)?;
@@ -178,6 +188,9 @@ impl Tracker {
         }
         tx.commit()?;
 
+        if let Some(closed) = closing {
+            self.last = Some(closed);
+        }
         if let Some(previous) = previous {
             self.last = previous;
         }
@@ -226,14 +239,15 @@ impl Tracker {
         delta: Counters,
         shares: &[(Timestamp, Activity)],
         sample: Sample,
+        untimed: bool,
         now: Timestamp,
     ) -> Result<Option<(Session, Origin)>> {
         let moved = !shares.is_empty();
-        let mut next = match &self.session {
+        let mut next = match self.session.as_ref().filter(|_| !untimed) {
             Some(open) => (open.clone(), Origin::Open),
             None if moved => {
                 let started_at = now.checked_sub(SignedDuration::from_secs(delta.time_s.into()))?;
-                self.resume_or_start(started_at, now)
+                self.resume_or_start(started_at, untimed, now)
             }
             None => return Ok(None),
         };
@@ -248,15 +262,22 @@ impl Tracker {
         Ok(Some(next))
     }
 
-    fn resume_or_start(&self, started_at: Timestamp, now: Timestamp) -> (Session, Origin) {
+    fn resume_or_start(
+        &self,
+        started_at: Timestamp,
+        untimed: bool,
+        now: Timestamp,
+    ) -> (Session, Origin) {
         match &self.last {
-            Some(last) if started_at.duration_since(last.updated_at) < MERGE_WITHIN => (
-                Session {
-                    ended_at: None,
-                    ..last.clone()
-                },
-                Origin::Reopened,
-            ),
+            Some(last) if !untimed && started_at.duration_since(last.updated_at) < MERGE_WITHIN => {
+                (
+                    Session {
+                        ended_at: None,
+                        ..last.clone()
+                    },
+                    Origin::Reopened,
+                )
+            }
             _ => (
                 Session {
                     id: 0,
@@ -265,18 +286,23 @@ impl Tracker {
                     ended_at: None,
                     activity: Activity::default(),
                     max_kmh: 0.0,
+                    estimated: untimed,
                 },
                 Origin::New,
             ),
         }
     }
 
+    /// The open session as it is once closed.
+    fn closing(&self) -> Option<Session> {
+        self.session.as_ref().map(|open| Session {
+            ended_at: Some(open.updated_at),
+            ..open.clone()
+        })
+    }
+
     fn close(&mut self) -> Result<()> {
-        if let Some(open) = &self.session {
-            let closed = Session {
-                ended_at: Some(open.updated_at),
-                ..open.clone()
-            };
+        if let Some(closed) = self.closing() {
             self.store.update_session(&closed)?;
             self.session = None;
             self.last = Some(closed);
@@ -366,6 +392,16 @@ fn plausible(delta: Counters, elapsed: SignedDuration) -> bool {
     i64::from(delta.time_s) <= elapsed.as_secs() + CLOCK_SLACK_S
         && metres <= (time_s + 1) * MAX_KMH * 1_000 / 3_600 + 10
         && u64::from(delta.steps) <= (time_s + 1) * MAX_STEPS_PER_S
+}
+
+/// Whether the catch-up `delta` covers so much less time than passed since
+/// `baseline` that the walk could have happened beyond the merge window, so
+/// that when it happened is unknown. It is still spread over the minutes
+/// just before now.
+fn untimed(delta: Counters, baseline: Option<Baseline>, now: Timestamp) -> bool {
+    let window = SignedDuration::from_secs(i64::from(delta.time_s)) + MERGE_WITHIN;
+    delta.time_s > LIVE_S
+        && baseline.is_some_and(|baseline| now.duration_since(baseline.seen_at) > window)
 }
 
 /// Energy for `delta`, at the belt speed for a live delta and at the
@@ -834,6 +870,74 @@ mod tests {
         let session = tracker.session().unwrap();
         assert_eq!(session.id, closed.id);
         assert_eq!(integers(session.activity), (100, 200, 100));
+    }
+
+    #[test]
+    fn a_catch_up_long_after_the_pad_was_last_seen_is_an_estimated_session() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        walk_from(&mut tracker, at("10:00:00"), 60);
+        tracker.on_link_lost().unwrap();
+        let earlier = tracker.last_session().unwrap().clone();
+        feed(&mut tracker, &[(at("10:30:00"), walking(660, 66, 1_320))]);
+        let session = tracker.session().unwrap();
+        assert_ne!(session.id, earlier.id);
+        assert!(session.estimated);
+        assert_eq!(session.started_at, at("10:20:00"));
+        assert_eq!(integers(session.activity), (600, 1_200, 600));
+        let rows = minutes(&tracker, at("10:02")..at("10:30"));
+        assert_eq!(rows.first().map(|&(start, _)| start), Some(at("10:20")));
+        assert_eq!(rows.len(), 10);
+        assert_eq!(tracker.last_session(), Some(&earlier));
+    }
+
+    #[test]
+    fn a_catch_up_within_the_merge_window_of_the_last_frame_is_timed() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        walk_from(&mut tracker, at("10:00:00"), 60);
+        tracker.on_link_lost().unwrap();
+        feed(&mut tracker, &[(at("10:03:40"), walking(100, 10, 200))]);
+        assert!(!tracker.session().unwrap().estimated);
+    }
+
+    #[test]
+    fn an_estimated_catch_up_never_reopens_a_recent_session() {
+        let mut tracker = tracker_at(at("09:00:00"));
+        tracker
+            .on_sample("pad-b", stopped(0, 0, 0), at("09:00:00"))
+            .unwrap();
+        walk_from(&mut tracker, at("10:00:00"), 60);
+        tracker.on_link_lost().unwrap();
+        let earlier = tracker.last_session().unwrap().clone();
+        tracker
+            .on_sample("pad-b", walking(100, 10, 200), at("10:02:00"))
+            .unwrap();
+        let session = tracker.session().unwrap();
+        assert_ne!(session.id, earlier.id);
+        assert!(session.estimated);
+        assert_eq!(tracker.last_session(), Some(&earlier));
+    }
+
+    #[test]
+    fn an_estimated_catch_up_closes_the_open_session_first() {
+        let mut tracker = tracker_at(at("09:00:00"));
+        tracker
+            .on_sample("pad-b", stopped(0, 0, 0), at("09:00:00"))
+            .unwrap();
+        walk_from(&mut tracker, at("10:00:00"), 60);
+        let open = tracker.session().unwrap().clone();
+        tracker
+            .on_sample("pad-b", walking(100, 10, 200), at("10:01:01"))
+            .unwrap();
+        assert!(tracker.session().unwrap().estimated);
+        let closed = Session {
+            ended_at: Some(at("10:01:00")),
+            ..open
+        };
+        assert_eq!(tracker.last_session(), Some(&closed));
+        assert_eq!(
+            tracker.store().latest_closed_session().unwrap(),
+            Some(closed)
+        );
     }
 
     #[test]
