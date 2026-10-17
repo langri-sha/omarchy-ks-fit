@@ -583,7 +583,9 @@ function linkText(state) {
     case 'not-found':
       return Pad + " isn't nearby"
     case 'link-lost':
-      return 'Lost the connection, retrying'
+      return state.autoConnect === true
+        ? 'Lost the connection, retrying'
+        : 'Lost the connection'
     case 'unsupported-ftms':
       return Pad + " uses FTMS, which isn't supported yet"
     case 'unsupported-ks-text':
