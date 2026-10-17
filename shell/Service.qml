@@ -150,7 +150,6 @@ QtObject {
   // Reference-counted: a bar, and so a panel, exists per monitor.
   function panelOpened() {
     openPanels++
-    if (helper === "missing" || helper === "outdated") retryHelper()
     wake()
     refreshStats()
   }
@@ -278,8 +277,8 @@ QtObject {
     restartTimer.restart()
   }
 
-  // `missing` and `outdated` stay up until the helper answers, so polling
-  // doesn't make the panel flicker.
+  // Runs on Retry and from bin/ks-fit-build. `missing` and `outdated` stay up
+  // until the helper answers, so a retry doesn't make the panel flicker.
   function retryHelper() {
     if (stale || helper === "ready") return
     if (helperProcess.running) {
