@@ -49,7 +49,7 @@ BorderSurface {
     switch (status) {
       case "missing":
       case "outdated":
-        return "It compiles the bundled Rust source with cargo in a terminal, which takes a couple of minutes. Nothing leaves the machine except crate downloads."
+        return "It compiles the bundled Rust source with cargo in a terminal, which takes a couple of minutes. It downloads the crates it needs, and rustup may first fetch the stable toolchain."
       case "failed":
         return service && service.helperError !== "" ? service.helperError : "It exited repeatedly."
       case "stale":
