@@ -1,5 +1,7 @@
 //! Sequences belt commands and paces writes to the pad.
 
+use std::collections::VecDeque;
+
 use tokio::time::{Duration, Instant};
 
 use crate::protocol::{Belt, Command, Mode, Prefs, Status};
@@ -22,6 +24,10 @@ const REMOTE_SETTLE: Duration = Duration::from_secs(3);
 const NUDGE_LEAD_DKMH: u8 = 5;
 const MIN_DKMH: u8 = 5;
 const FALLBACK_MAX_DKMH: u8 = 60;
+const REPLY_WINDOW: Duration = Duration::from_secs(2);
+const FOREIGN_WINDOW: Duration = Duration::from_secs(5);
+const FOREIGN_STATUSES: usize = 3;
+const SHARED_HOLD: Duration = Duration::from_secs(10);
 
 /// What the shell asked the pad to do.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,6 +54,8 @@ pub enum Failure {
     AutoMode,
     #[error("the pad is set to imperial units")]
     ImperialUnits,
+    #[error("another app is controlling the pad")]
+    InUse,
     #[error("the pad did not start the belt")]
     StartNotAcknowledged,
     #[error("the pad did not switch to manual mode")]
@@ -65,6 +73,7 @@ impl Failure {
             Failure::Busy => "busy",
             Failure::AutoMode => "auto-mode",
             Failure::ImperialUnits => "imperial-units",
+            Failure::InUse => "in-use",
             Failure::StartNotAcknowledged => "start-not-acknowledged",
             Failure::ModeNotAcknowledged => "mode-not-acknowledged",
             Failure::StopNotAcknowledged => "stop-not-acknowledged",
@@ -105,6 +114,8 @@ pub struct PadView {
     pub max_kmh: f64,
     pub busy: Option<Busy>,
     pub imperial: bool,
+    /// Another local client is polling the pad over the same link.
+    pub shared: bool,
 }
 
 /// The belt state machine for one link. Drop it when the link goes away:
@@ -128,6 +139,7 @@ pub struct Controller {
     idle_polls_before_start: u8,
     op: Option<Op>,
     remote: Option<(u8, Instant)>,
+    peers: Peers,
     dead: bool,
 }
 
@@ -200,6 +212,7 @@ impl Controller {
             idle_polls_before_start: 0,
             op: None,
             remote: None,
+            peers: Peers::default(),
             dead: false,
         }
     }
@@ -216,6 +229,7 @@ impl Controller {
         self.answered = true;
         self.heard = now;
         self.status = Some((now, *status));
+        self.peers.received(now);
         if matches!(status.belt, Belt::Starting | Belt::Running) {
             self.start_sent = None;
         }
@@ -291,10 +305,15 @@ impl Controller {
             Some(Op::Stop(stopping)) => stopping.deadline,
             None => None,
         };
-        [Some(self.heard + WATCHDOG), Some(write), op]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            Some(self.heard + WATCHDOG),
+            Some(write),
+            op,
+            self.peers.until,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// The pad as last reported, or `None` before the first status.
@@ -313,6 +332,7 @@ impl Controller {
                 _ => None,
             },
             imperial: self.imperial,
+            shared: self.peers.until.is_some(),
         })
     }
 
@@ -407,6 +427,8 @@ impl Controller {
     fn may_drive(&self) -> Result<(), Failure> {
         if self.imperial {
             Err(Failure::ImperialUnits)
+        } else if self.peers.until.is_some() {
+            Err(Failure::InUse)
         } else {
             Ok(())
         }
@@ -549,6 +571,7 @@ impl Controller {
             actions.push(Action::LinkDead);
             return;
         }
+        self.peers.expire(now);
         self.expire(now, actions);
         self.pump(now, actions);
     }
@@ -673,6 +696,7 @@ impl Controller {
         if command.requests_status() {
             self.answered = false;
             self.polled = command == Command::AskStats;
+            self.peers.sent(now);
         }
         match command {
             Command::AskStats => self.poll = now + POLL,
@@ -729,6 +753,55 @@ impl Controller {
 
     fn speed(&self) -> u8 {
         self.status.map_or(0, |(_, status)| status.speed_dkmh)
+    }
+}
+
+/// Notices another local client polling the pad: BlueZ shares one link
+/// between clients, so the replies to its polls reach us as well.
+#[derive(Debug, Default)]
+struct Peers {
+    /// Our status requests that may still be answered.
+    requests: VecDeque<Instant>,
+    /// Statuses nobody here asked for.
+    foreign: VecDeque<Instant>,
+    streak: Option<Instant>,
+    /// Until when the pad counts as shared.
+    until: Option<Instant>,
+}
+
+impl Peers {
+    fn sent(&mut self, now: Instant) {
+        self.requests.push_back(now);
+    }
+
+    fn received(&mut self, now: Instant) {
+        let recent =
+            |window: Duration| move |at: &Instant| now.saturating_duration_since(*at) <= window;
+        self.requests.retain(recent(REPLY_WINDOW));
+        if self.requests.pop_front().is_some() {
+            return;
+        }
+        self.foreign.retain(recent(FOREIGN_WINDOW));
+        if self.foreign.is_empty() {
+            self.streak = Some(now);
+        }
+        self.foreign.push_back(now);
+        let sustained = self
+            .streak
+            .is_some_and(|since| now.saturating_duration_since(since) >= FOREIGN_WINDOW);
+        if sustained && self.foreign.len() >= FOREIGN_STATUSES {
+            if self.until.is_none() {
+                log::warn!("another client is polling the pad");
+            }
+            self.until = Some(now + SHARED_HOLD);
+        }
+    }
+
+    fn expire(&mut self, now: Instant) {
+        if self.until.is_some_and(|until| now >= until) {
+            log::info!("the pad is no longer shared");
+            self.until = None;
+        }
     }
 }
 
@@ -887,6 +960,11 @@ mod tests {
 
         fn request(&mut self, request: Request) {
             let actions = self.controller.request(self.now, request);
+            self.apply(actions);
+        }
+
+        fn inject(&mut self, status: Status) {
+            let actions = self.controller.on_status(self.now, &status);
             self.apply(actions);
         }
 
@@ -1587,6 +1665,47 @@ mod tests {
     }
 
     #[test]
+    fn a_second_client_polling_the_pad_marks_it_shared_until_it_goes_quiet() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(ms(500));
+        for _ in 0..6 {
+            bench.inject(idle());
+            bench.run(secs(1));
+        }
+        assert!(bench.view().shared);
+        bench.request(Request::Start);
+        bench.request(Request::SetTarget(3.0));
+        assert_eq!(
+            bench.failures(),
+            [
+                (Request::Start, Failure::InUse),
+                (Request::SetTarget(3.0), Failure::InUse)
+            ]
+        );
+        bench.set_pad(running(30));
+        bench.request(Request::Stop);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+        bench.run(secs(10));
+        assert!(!bench.view().shared);
+        bench.request(Request::Start);
+        bench.run(secs(1));
+        assert_eq!(bench.commands().last(), Some(&Command::StartBelt));
+    }
+
+    #[test]
+    fn a_few_unrequested_statuses_do_not_mark_the_pad_shared() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(ms(500));
+        for _ in 0..3 {
+            bench.inject(idle());
+            bench.run(ms(300));
+        }
+        bench.run(secs(10));
+        assert!(!bench.view().shared);
+    }
+
+    #[test]
     fn the_watchdog_declares_the_link_dead_after_10_s_without_a_status() {
         let mut bench = Bench::obeying(idle());
         bench.run(ms(500));
@@ -1668,6 +1787,7 @@ mod tests {
             (Failure::Busy, "busy"),
             (Failure::AutoMode, "auto-mode"),
             (Failure::ImperialUnits, "imperial-units"),
+            (Failure::InUse, "in-use"),
             (Failure::StartNotAcknowledged, "start-not-acknowledged"),
             (Failure::ModeNotAcknowledged, "mode-not-acknowledged"),
             (Failure::StopNotAcknowledged, "stop-not-acknowledged"),
