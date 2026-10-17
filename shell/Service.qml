@@ -24,10 +24,10 @@ QtObject {
   readonly property real settingsWeightKg: Model.settingsWeight(settings)
   readonly property bool demo: Model.coerceBool(settings.demo, false)
   // The mode the helper runs in, or starts in next. A `demo` flip reaches it
-  // only while the belt stands still: switching helpers would take the
-  // controls away from a pad someone is walking on.
+  // only once the belt is seen standing still: switching helpers would take
+  // the controls away from a pad someone is walking on.
   property bool helperDemo: false
-  readonly property bool demoBlocked: demo !== helperDemo && exercising
+  readonly property bool demoBlocked: demo !== helperDemo && mayBeMoving
 
   // After `omarchy plugin update` the kept service still runs the old QML.
   readonly property bool stale: !!manifest && !!manifest.version && manifest.version !== Version.version
@@ -43,6 +43,8 @@ QtObject {
   property var state: null
   readonly property bool connected: Model.connected(state)
   readonly property bool exercising: Model.exercising(state)
+  // Outlives `state`: see Model.mayBeMoving.
+  property bool mayBeMoving: false
   readonly property var pad: connected ? state.pad : null
   readonly property var today: state && state.today ? state.today : null
   readonly property real weightKg: Model.weightFor(state, settingsWeightKg)
@@ -258,6 +260,7 @@ QtObject {
 
   function handleState(message) {
     var closed = state !== null && Model.sessionMark(message) !== Model.sessionMark(state)
+    mayBeMoving = Model.mayBeMoving(mayBeMoving, message)
     state = message
     if (Model.connected(message) && !Model.exercising(message)) stopFailure = ""
     if (closed) refreshStats()
@@ -398,14 +401,14 @@ QtObject {
   onSettingsWeightKgChanged: configure()
 
   function applyDemo() {
-    if (demo === helperDemo || exercising) return
+    if (demo === helperDemo || mayBeMoving) return
     helperDemo = demo
     if (helperProcess.running) restartHelper()
   }
 
   // Injection fires this before the deferred start, while nothing runs yet.
   onDemoChanged: applyDemo()
-  onExercisingChanged: applyDemo()
+  onMayBeMovingChanged: applyDemo()
 
   // The shell assigns shell and manifest right after createObject().
   Component.onCompleted: Qt.callLater(startHelper)
