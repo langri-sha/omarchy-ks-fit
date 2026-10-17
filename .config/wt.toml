@@ -4,4 +4,4 @@
 sync = "{% if base == default_branch %}git fetch {{ remote }} {{ default_branch }} && git merge --ff-only --quiet {{ remote }}/{{ default_branch }}{% endif %}"
 
 [[pre-start]]
-install = "pnpm install --frozen-lockfile"
+install = "pnpm i --frozen-lockfile"
