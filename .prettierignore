@@ -4,3 +4,4 @@ dist/
 !.projenrc.ts
 pnpm-lock.yaml
 !.editorconfig
+/shell/Version.js

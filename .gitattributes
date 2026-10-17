@@ -20,6 +20,7 @@
 /daemon/Cargo.toml linguist-generated
 /license linguist-generated
 /lint-staged.config.js linguist-generated
+/manifest.json linguist-generated
 /package.json linguist-generated
 /pnpm-lock.yaml linguist-generated
 /pnpm-workspace.yaml linguist-generated
@@ -27,4 +28,5 @@
 /renovate.json5 linguist-generated
 /rust-toolchain.toml linguist-generated
 /rustfmt.toml linguist-generated
+/shell/Version.js linguist-generated
 readme text=auto linguist-language=Markdown
