@@ -29,6 +29,22 @@ fi
 "$helper" daemon "$@" <&0 &
 pid=$!
 
+# Once this version's helper has come up, builds for other versions are dead
+# weight; until then they are what tells an update from a first run.
+if [[ -z ${KS_FIT_HELPER:-} ]]; then
+  (
+    sleep 2
+    kill -0 "$pid" 2>/dev/null || exit 0
+    for old in "$helpers"/*/; do
+      old=${old%/}
+      if [[ $old != "$helpers/$version" ]]; then
+        rm -f -- "$old/ks-fit"
+        rmdir -- "$old" 2>/dev/null || true
+      fi
+    done
+  ) </dev/null >/dev/null 2>&1 &
+fi
+
 # Quickshell's `running = false` sends TERM to this script only; pass it on so
 # the helper shuts down on its own terms rather than being orphaned.
 trap 'kill -TERM "$pid" 2>/dev/null' TERM
