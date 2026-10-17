@@ -16,6 +16,7 @@ use ks_fit::radio::{AdapterState, Radio, RadioEvent};
 use ks_fit::stats::{self, Period};
 use ks_fit::store::{self, Store};
 use ks_fit::tracker::Tracker;
+use log::LevelFilter;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::runtime;
@@ -58,6 +59,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    log_to_stderr();
     match cli {
         Cli::Help => exit_after(print(USAGE)),
         Cli::Version => exit_after(print(&format!("ks-fit {}\n", env!("CARGO_PKG_VERSION")))),
@@ -312,6 +314,39 @@ fn exit_after(written: io::Result<()>) -> ExitCode {
             log::error!("cannot write to stdout: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+struct Stderr;
+
+impl log::Log for Stderr {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::max_level()
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            let line = format!("{} {}\n", record.level(), record.args());
+            let _ = io::stderr().write_all(line.as_bytes());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Logs to stderr at the level in `KS_FIT_LOG`, `info` by default.
+fn log_to_stderr() {
+    static LOGGER: Stderr = Stderr;
+    let setting = env::var("KS_FIT_LOG").ok();
+    let level = setting.as_deref().map(str::parse::<LevelFilter>);
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(match level {
+            Some(Ok(level)) => level,
+            _ => LevelFilter::Info,
+        });
+    }
+    if let (Some(setting), Some(Err(_))) = (setting, level) {
+        log::warn!("KS_FIT_LOG={setting:?} is not a log level; logging at info");
     }
 }
 
