@@ -140,7 +140,7 @@ QtObject {
   // already rules out; the daemon's own refusals arrive as `notice`, and a
   // stop it couldn't carry out raises the alarm.
   function ipcBelt(cmd) {
-    var plan = Model.ipcPlan(helper, canSend(), state, cmd)
+    var plan = Model.ipcPlan(helper, canSend(), state, cmd, mayBeMoving)
     if (plan.send) beltCommand(cmd)
     else if (plan.stopFailed) raiseStopFailure()
     return plan.reply
@@ -260,7 +260,7 @@ QtObject {
   }
 
   function handleError(message) {
-    if (Model.stopFailed(message)) raiseStopFailure()
+    if (Model.stopFailed(message, mayBeMoving)) raiseStopFailure()
     else showNotice(Model.errorText(message))
   }
 
