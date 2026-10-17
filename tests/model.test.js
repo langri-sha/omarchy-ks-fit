@@ -771,6 +771,22 @@ test('linkText words every link situation for the header', () => {
   assert.equal(M.linkText(null), '')
 })
 
+test('linkText promises a retry after a lost link only with autoConnect on', () => {
+  const lost = (autoConnect) =>
+    state({
+      link: 'disconnected',
+      linkDetail: 'link-lost',
+      pad: null,
+      autoConnect,
+    })
+  assert.equal(M.linkText(lost(true)), 'Lost the connection, retrying')
+  assert.equal(M.linkText(lost(false)), 'Lost the connection')
+  assert.deepEqual(
+    plain(M.padActions(lost(false))).map((a) => a.id),
+    ['connect', 'forget'],
+  )
+})
+
 test('linkHint explains a missing pad and refusals without alarm', () => {
   assert.match(
     M.linkHint(
