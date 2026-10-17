@@ -20,7 +20,7 @@ QtObject {
   // Settings live on the widget's bar-layout entry. The manifest's defaults
   // are metadata only, so every read carries its fallback.
   readonly property var settings: Model.layoutEntry(shell ? shell.barConfig : null, pluginId)
-  readonly property real weightKg: Model.coerceNumber(settings.weightKg, 70, 20, 300)
+  readonly property real settingsWeightKg: Model.settingsWeight(settings)
   readonly property bool demo: Model.coerceBool(settings.demo, false)
   // The mode the helper runs in, or starts in next. A `demo` flip reaches it
   // only while the belt stands still: switching helpers would take the
@@ -44,6 +44,7 @@ QtObject {
   readonly property bool exercising: Model.exercising(state)
   readonly property var pad: connected ? state.pad : null
   readonly property var today: state && state.today ? state.today : null
+  readonly property real weightKg: Model.weightFor(state, settingsWeightKg)
   readonly property string barText: helperStatus === "ready" ? Model.barText(state) : ""
   readonly property string tooltip: Model.tooltip(state, helperStatus)
 
@@ -81,7 +82,10 @@ QtObject {
     return true
   }
 
-  function configure() { return send({ cmd: "configure", weightKg: weightKg }) }
+  function configure() {
+    var command = Model.configureCommand(settings)
+    return command ? send(command) : false
+  }
   function wake() { return send({ cmd: "wake" }) }
   function scan() { return send({ cmd: "scan" }) }
   function stopScan() { return send({ cmd: "stopScan" }) }
@@ -352,7 +356,7 @@ QtObject {
     onTriggered: root.refreshStats()
   }
 
-  onWeightKgChanged: configure()
+  onSettingsWeightKgChanged: configure()
 
   function applyDemo() {
     if (demo === helperDemo || exercising) return

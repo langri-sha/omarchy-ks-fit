@@ -50,6 +50,25 @@ function layoutEntry(barConfig, pluginId) {
   return {}
 }
 
+// The entry's body weight, or 0 when it sets none.
+function settingsWeight(entry) {
+  return coerceNumber(entry ? entry.weightKg : undefined, 0, 20, 300)
+}
+
+// Only what the bar entry sets; the daemon keeps its persisted value for the
+// rest. null when there is nothing to send.
+function configureCommand(entry) {
+  var weight = settingsWeight(entry)
+  return weight > 0 ? { cmd: 'configure', weightKg: weight } : null
+}
+
+// What calories are estimated for: the daemon's value once it reports one.
+function weightFor(state, entryWeight) {
+  var reported = state ? Number(state.weightKg) : NaN
+  if (isFinite(reported) && reported > 0) return reported
+  return entryWeight > 0 ? entryWeight : 70
+}
+
 // Delay before restart number `attempt` (1-based).
 function backoffMs(attempt) {
   return backoffSteps[

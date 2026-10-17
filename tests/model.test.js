@@ -396,3 +396,29 @@ test('demoBlockedText says which way the switch is waiting', () => {
   assert.equal(M.demoBlockedText(true), 'Demo mode starts once the belt stops')
   assert.equal(M.demoBlockedText(false), 'Demo mode ends once the belt stops')
 })
+
+test('configureCommand carries only the weight the bar entry sets', () => {
+  assert.deepEqual(plain(M.configureCommand({ id: 'x', weightKg: 82 })), {
+    cmd: 'configure',
+    weightKg: 82,
+  })
+  assert.deepEqual(plain(M.configureCommand({ weightKg: '72.5' })), {
+    cmd: 'configure',
+    weightKg: 72.5,
+  })
+  assert.deepEqual(plain(M.configureCommand({ weightKg: 900 })), {
+    cmd: 'configure',
+    weightKg: 300,
+  })
+  assert.equal(M.configureCommand({ id: 'x', demo: true }), null)
+  assert.equal(M.configureCommand({ weightKg: 'heavy' }), null)
+  assert.equal(M.configureCommand(null), null)
+})
+
+test('weightFor prefers the daemon, then the bar entry, then 70 kg', () => {
+  assert.equal(M.weightFor(state({ weightKg: 72.5 }), 82), 72.5)
+  assert.equal(M.weightFor(state({ weightKg: undefined }), 82), 82)
+  assert.equal(M.weightFor(null, 0), 70)
+  assert.equal(M.settingsWeight({ weightKg: 82 }), 82)
+  assert.equal(M.settingsWeight({}), 0)
+})
