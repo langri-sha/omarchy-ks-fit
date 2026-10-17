@@ -1,8 +1,10 @@
 //! The actor loop between the shell, the pad and the store.
 
+use std::fs::{File, OpenOptions, TryLockError};
 use std::future::Future;
 use std::io;
 use std::mem;
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 
 use anyhow::Context;
@@ -15,7 +17,7 @@ use crate::ipc::{self, Address, BadCommand, Command, Commands, Message};
 use crate::protocol::{Belt, Notification, Reassembler, Status};
 use crate::radio::{AdapterState, ConnectFailure, LinkId, Radio, RadioEvent};
 use crate::stats;
-use crate::store::{self, Device};
+use crate::store::{self, DataDirError, Device};
 use crate::tracker::{Sample, Tracker};
 
 const TICK: Duration = Duration::from_secs(1);
@@ -37,10 +39,19 @@ const WAKE_EVERY: Duration = Duration::from_secs(20);
 /// The target until the walker picks one: the usual start-speed
 /// preference, so that a first start sends no speed command.
 const DEFAULT_TARGET_KMH: f64 = 2.0;
+/// A previous instance may still be shutting down during a shell reload.
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+const LOCK_RETRY: Duration = Duration::from_millis(250);
 
 /// Why the daemon cannot run.
 #[derive(Debug, thiserror::Error)]
 pub enum Fatal {
+    #[error("another ks-fit daemon is running")]
+    AlreadyRunning,
+    #[error(transparent)]
+    DataDir(#[from] DataDirError),
+    #[error("cannot lock {}: {source}", path.display())]
+    Lock { path: PathBuf, source: io::Error },
     #[error("{0:#}")]
     Database(#[from] anyhow::Error),
     #[error("the Bluetooth task stopped")]
@@ -51,8 +62,50 @@ impl Fatal {
     /// The `fatal` code on the wire.
     pub fn code(&self) -> &'static str {
         match self {
+            Fatal::AlreadyRunning => "already-running",
+            Fatal::DataDir(_) => "data-dir",
+            Fatal::Lock { .. } => "lock",
             Fatal::Database(_) => "database",
             Fatal::RadioStopped => "radio",
+        }
+    }
+
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Fatal::AlreadyRunning => 3,
+            _ => 1,
+        }
+    }
+}
+
+/// Takes the single-instance lock in `dir`, created 0700 like the data
+/// directory, waiting out a previous instance for up to [`LOCK_WAIT`]. The
+/// simulator has a lock of its own, so a demo never blocks the real pad.
+pub async fn lock(dir: &Path, simulated: bool) -> Result<File, Fatal> {
+    let dir = store::prepare_data_dir(dir)?;
+    let path = dir.join(if simulated {
+        "daemon-sim.lock"
+    } else {
+        "daemon.lock"
+    });
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path);
+    let file = match file {
+        Ok(file) => file,
+        Err(source) => return Err(Fatal::Lock { path, source }),
+    };
+    let deadline = Instant::now() + LOCK_WAIT;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                time::sleep(LOCK_RETRY).await;
+            }
+            Err(TryLockError::WouldBlock) => return Err(Fatal::AlreadyRunning),
+            Err(TryLockError::Error(source)) => return Err(Fatal::Lock { path, source }),
         }
     }
 }
@@ -778,5 +831,69 @@ fn request_name(request: Request) -> &'static str {
         Request::Toggle => "toggle",
         Request::SetTarget(_) => "speed",
         Request::Nudge(_) => "nudge",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::testing::TempDir;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_instance_gives_up_after_five_seconds() {
+        let dir = TempDir::new("lock-held");
+        let _held = lock(&dir.0, false).await.unwrap();
+        let started = Instant::now();
+        assert!(matches!(
+            lock(&dir.0, false).await,
+            Err(Fatal::AlreadyRunning)
+        ));
+        assert!(started.elapsed() >= LOCK_WAIT);
+        assert_eq!(Fatal::AlreadyRunning.code(), "already-running");
+        assert_eq!(Fatal::AlreadyRunning.exit_code(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_instance_takes_over_once_the_first_exits() {
+        let dir = TempDir::new("lock-released");
+        let held = lock(&dir.0, false).await.unwrap();
+        let release = tokio::spawn(async move {
+            time::sleep(Duration::from_secs(2)).await;
+            drop(held);
+        });
+        let started = Instant::now();
+        assert!(lock(&dir.0, false).await.is_ok());
+        assert!(started.elapsed() >= Duration::from_secs(2));
+        assert!(started.elapsed() < LOCK_WAIT);
+        release.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_simulator_locks_apart_from_the_real_pad() {
+        let dir = TempDir::new("lock-simulated");
+        let _real = lock(&dir.0, false).await.unwrap();
+        let _simulated = lock(&dir.0, true).await.unwrap();
+        assert!(dir.join("daemon.lock").is_file());
+        assert!(dir.join("daemon-sim.lock").is_file());
+    }
+
+    #[tokio::test]
+    async fn refuses_a_lock_directory_that_is_a_symlink() {
+        let dir = TempDir::new("lock-symlink");
+        let link = dir.join("runtime");
+        std::os::unix::fs::symlink(&dir.0, &link).unwrap();
+        let refused = lock(&link, false).await.unwrap_err();
+        assert!(matches!(refused, Fatal::DataDir(DataDirError::Symlink(_))));
+        assert_eq!(refused.code(), "data-dir");
+    }
+
+    #[tokio::test]
+    async fn creates_a_missing_lock_directory_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("lock-created");
+        let runtime = dir.join("omarchy-ks-fit");
+        lock(&runtime, false).await.unwrap();
+        let mode = std::fs::metadata(&runtime).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 }
