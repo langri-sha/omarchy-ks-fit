@@ -225,7 +225,7 @@ versionFile.addLine(`var version = "${version}"`)
 versionFile.addLine('')
 
 // Prettier can't parse the `.pragma library` line QML needs.
-project.prettier?.ignore.addPatterns('/shell/Version.js')
+project.prettier?.ignore.addPatterns('/shell/Model.js', '/shell/Version.js')
 
 project.package?.addField('private', true)
 project.package?.addField('packageManager', 'pnpm@12.8.2')
