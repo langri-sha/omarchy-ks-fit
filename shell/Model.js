@@ -231,6 +231,27 @@ function beltBlocker(helper, state, cmd) {
   return ''
 }
 
+// An IPC belt command goes to the helper whenever one can hear it, even if
+// the cached state predicts a refusal: the daemon's answer is the one that
+// raises a failed stop's alarm, and a start is a cue to look for the pad.
+// `reply` is what the CLI prints; `stopFailed` asks for the alarm when a stop
+// can't be delivered at all.
+function ipcPlan(helper, helperRunning, state, cmd) {
+  var effective = cmd === 'toggle' ? (exercising(state) ? 'stop' : 'start') : cmd
+  var reachable = helper === 'ready' && !!helperRunning
+  var blocker = beltBlocker(helper, state, effective)
+  return {
+    send: reachable,
+    reply:
+      blocker !== ''
+        ? blocker
+        : reachable
+          ? 'ok'
+          : 'helper-' + (helper === 'ready' ? 'starting' : helper),
+    stopFailed: !reachable && effective === 'stop',
+  }
+}
+
 function isPeriod(period) {
   return periods.indexOf(period) !== -1
 }

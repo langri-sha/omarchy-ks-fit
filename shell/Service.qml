@@ -124,12 +124,13 @@ QtObject {
   }
 
   // IPC answers right away, so it can only report what the cached state
-  // already rules out; the daemon's own refusals arrive as `notice`.
+  // already rules out; the daemon's own refusals arrive as `notice`, and a
+  // stop it couldn't carry out raises the alarm.
   function ipcBelt(cmd) {
-    var effective = cmd === "toggle" ? (exercising ? "stop" : "start") : cmd
-    var blocker = Model.beltBlocker(helper, state, effective)
-    if (blocker !== "") return blocker
-    return beltCommand(cmd) ? "ok" : "helper-" + helper
+    var plan = Model.ipcPlan(helper, helperProcess.running, state, cmd)
+    if (plan.send) beltCommand(cmd)
+    else if (plan.stopFailed) raiseStopFailure()
+    return plan.reply
   }
 
   // Writes the bar entry as `omarchy bar set` would, and tells the helper
@@ -245,10 +246,11 @@ QtObject {
   }
 
   function handleError(message) {
-    if (!Model.stopFailed(message)) {
-      showNotice(Model.errorText(message))
-      return
-    }
+    if (Model.stopFailed(message)) raiseStopFailure()
+    else showNotice(Model.errorText(message))
+  }
+
+  function raiseStopFailure() {
     stopFailure = Model.stopFailureText
     Util.execArgv(["omarchy-notification-send", "--app-name", "KS Fit", "-u", "critical",
                    "-g", Model.glyphs.walk, Model.stopFailureText])
