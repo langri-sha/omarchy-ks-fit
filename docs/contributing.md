@@ -43,10 +43,11 @@ cargo clippy --locked --all-targets -- -D warnings
   retries, then walks through scanning, connecting, every period and metric, a
   walk, a stale-QML update, Bluetooth off, a pad out of range, a link lost
   mid-walk and demo mode. Along the way it checks that a hovered Start doesn't
-  start the belt, that arrow keys reach it, that `Backspace` stops it, and that
-  a demo switch and Restart shell wait through the lost link. It prints
-  `HARNESS ok` at the end. Desktop commands such as `omarchy-notification-send`
-  are stubbed on `PATH`, and a call to any of them fails the run.
+  start the belt, that arrow keys reach it, that `Backspace` stops it, that a
+  demo switch and Restart shell wait through the lost link, and that a helper
+  being restarted takes no commands. It prints `HARNESS ok` at the end. Desktop
+  commands such as `omarchy-notification-send` are stubbed on `PATH`, and a call
+  to any of them fails the run.
 - `KS_FIT_RENDER_HELPER=target/debug/ks-fit pnpm plugin:render` drives the real
   helper instead, in demo mode and with its data under a temp dir; the steps
   that need the mock's `{"cmd":"mock",…}` controls are skipped.
@@ -63,9 +64,10 @@ cargo clippy --locked --all-targets -- -D warnings
   and the panel only bind to it. It's a `QtObject`, so `state` doesn't shadow
   `Item.state`; its timers, process and IPC handler are property values.
 - The service restarts the helper by closing its stdin and waiting up to 3 s
-  before a SIGTERM, which the launcher forwards. A fatal `already-running` means
-  the previous helper is still shutting down, and is retried with the usual
-  backoff. `missing`, `outdated` and `failed` wait for **Retry** or for
+  before a SIGTERM, which the launcher forwards; meanwhile `send()` refuses, and
+  IPC answers `helper-starting`. A fatal `already-running` means the previous
+  helper is still shutting down, and is retried with the usual backoff.
+  `missing`, `outdated` and `failed` wait for **Retry** or for
   `bin/ks-fit-build`, which calls `retryHelper` when it's done.
 - `shell/ServiceWindows.qml` holds an invisible layer surface whose
   `IdleInhibitor` keeps the screen awake while the belt may be moving. It's
