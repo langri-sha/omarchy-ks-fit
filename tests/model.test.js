@@ -438,3 +438,405 @@ test('stopFailed singles out stops the pad did not carry out', () => {
   assert.equal(M.stopFailed(null), false)
   assert.ok(M.stopFailureText.includes('remote'))
 })
+
+const weekStats = (fields) => ({
+  type: 'stats',
+  id: 7,
+  period: 'week',
+  offset: 0,
+  start: '2026-09-28',
+  end: '2026-10-04',
+  buckets: [5321, 0, 7200, 6100, 4800, 0, 7779].map((steps, i) => ({
+    key: `2026-09-${28 + i}`,
+    steps,
+    kcal: steps / 25,
+    distanceM: steps * 0.7,
+    activeS: steps / 2,
+  })),
+  totals: { steps: 31200, kcal: 1290.5, distanceM: 22900, activeS: 20100 },
+  activeBuckets: 5,
+  ...fields,
+})
+
+const zeroBuckets = (n) =>
+  Array.from({ length: n }, () => ({
+    steps: 0,
+    kcal: 0,
+    distanceM: 0,
+    activeS: 0,
+  }))
+
+test('formatKm, formatKcal, formatSteps and formatActive', () => {
+  assert.deepEqual(
+    [0, 870, 4310, 22900, 123456].map((m) => M.formatKm(m)),
+    ['0.00 km', '0.87 km', '4.31 km', '22.9 km', '123 km'],
+  )
+  assert.equal(M.formatKcal(41.2), '41 kcal')
+  assert.equal(M.formatKcal(1290.5), '1,291 kcal')
+  assert.equal(M.formatSteps(1), '1 step')
+  assert.equal(M.formatSteps(1023), '1,023 steps')
+  assert.deepEqual(
+    [0, 45, 60, 1500, 3600, 3900].map((s) => M.formatActive(s)),
+    ['0 s', '45 s', '1 min', '25 min', '1 h', '1 h 5 min'],
+  )
+  assert.equal(M.formatWeight(70), '70 kg')
+  assert.equal(M.formatWeight(72.5), '72.5 kg')
+})
+
+test('niceMax rounds up to 1, 2, 2.5 or 5 times a power of ten', () => {
+  assert.deepEqual(
+    [0, -3, 0.3, 1, 7, 12, 21, 2600, 7000, 12345, 50000].map((v) =>
+      M.niceMax(v),
+    ),
+    [1, 1, 0.5, 1, 10, 20, 25, 5000, 10000, 20000, 50000],
+  )
+})
+
+test('parseDate reads the parts without going through UTC', () => {
+  assert.deepEqual(plain(M.parseDate('2026-10-04')), {
+    year: 2026,
+    month: 10,
+    day: 4,
+  })
+  assert.equal(M.parseDate('soon'), null)
+  assert.equal(M.weekday(M.parseDate('2026-10-04')), 0)
+  assert.equal(M.weekday(M.parseDate('2026-09-28')), 1)
+})
+
+test('rangeLabel names the period', () => {
+  assert.equal(M.rangeLabel(weekStats()), '28 Sep – 4 Oct')
+  assert.equal(
+    M.rangeLabel({ period: 'day', start: '2026-10-04', end: '2026-10-04' }),
+    'Sun 4 Oct',
+  )
+  assert.equal(
+    M.rangeLabel({ period: 'month', start: '2026-10-01', end: '2026-10-31' }),
+    'October 2026',
+  )
+  assert.equal(
+    M.rangeLabel({ period: 'year', start: '2026-01-01', end: '2026-12-31' }),
+    '2026',
+  )
+  assert.equal(M.rangeLabel(null), '')
+})
+
+test('axisLabels thins each period so labels never collide', () => {
+  const labelled = (period, n) =>
+    plain(M.axisLabels({ period, buckets: zeroBuckets(n) })).filter(
+      (l) => l !== '',
+    )
+  assert.deepEqual(labelled('day', 24), ['00', '06', '12', '18'])
+  assert.deepEqual(labelled('week', 7), ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+  assert.deepEqual(labelled('month', 31), ['1', '8', '15', '22', '29'])
+  assert.deepEqual(labelled('month', 28), ['1', '8', '15', '22'])
+  assert.equal(labelled('year', 12).join(''), 'JFMAMJJASOND')
+  assert.equal(
+    M.axisLabels({ period: 'day', buckets: zeroBuckets(24) }).length,
+    24,
+  )
+  assert.deepEqual([...M.axisLabels(null)], [])
+})
+
+test('bucketLabel names a single column', () => {
+  assert.equal(M.bucketLabel(weekStats(), 0), 'Mon 28 Sep')
+  assert.equal(M.bucketLabel(weekStats(), 6), 'Sun 4 Oct')
+  assert.equal(
+    M.bucketLabel({ period: 'day', start: '2026-10-04' }, 13),
+    '13:00–14:00',
+  )
+  assert.equal(
+    M.bucketLabel({ period: 'day', start: '2026-10-04' }, 23),
+    '23:00–00:00',
+  )
+  assert.equal(
+    M.bucketLabel({ period: 'month', start: '2026-10-01' }, 30),
+    'Sat 31 Oct',
+  )
+  assert.equal(
+    M.bucketLabel({ period: 'year', start: '2026-01-01' }, 9),
+    'October 2026',
+  )
+  assert.equal(M.bucketLabel(weekStats(), -1), '')
+})
+
+test('currentBucketIndex finds now only in the current period', () => {
+  const sunday = new Date(2026, 9, 4, 13, 5)
+  assert.equal(M.currentBucketIndex(weekStats(), sunday), 6)
+  assert.equal(
+    M.currentBucketIndex(weekStats(), new Date(2026, 8, 28, 0, 1)),
+    0,
+  )
+  assert.equal(M.currentBucketIndex(weekStats({ offset: -1 }), sunday), -1)
+  assert.equal(
+    M.currentBucketIndex(weekStats(), new Date(2026, 9, 5, 8, 0)),
+    -1,
+  )
+  assert.equal(
+    M.currentBucketIndex(
+      {
+        period: 'day',
+        offset: 0,
+        start: '2026-10-04',
+        end: '2026-10-04',
+        buckets: zeroBuckets(24),
+      },
+      sunday,
+    ),
+    13,
+  )
+  assert.equal(
+    M.currentBucketIndex(
+      {
+        period: 'month',
+        offset: 0,
+        start: '2026-10-01',
+        end: '2026-10-31',
+        buckets: zeroBuckets(31),
+      },
+      sunday,
+    ),
+    3,
+  )
+  assert.equal(
+    M.currentBucketIndex(
+      {
+        period: 'year',
+        offset: 0,
+        start: '2026-01-01',
+        end: '2026-12-31',
+        buckets: zeroBuckets(12),
+      },
+      sunday,
+    ),
+    9,
+  )
+  assert.equal(M.currentBucketIndex(null, sunday), -1)
+})
+
+test('metricValue and peakIndex follow the metric', () => {
+  const stats = weekStats()
+  assert.equal(M.metricValue(stats.buckets[0], 'steps'), 5321)
+  assert.equal(M.metricValue(stats.buckets[0], 'calories'), 5321 / 25)
+  assert.equal(M.metricValue(null, 'steps'), 0)
+  assert.equal(M.peakIndex(stats, 'steps'), 6)
+  assert.equal(M.peakIndex(weekStats({ buckets: zeroBuckets(7) }), 'steps'), -1)
+})
+
+test('summary words the totals by metric and period', () => {
+  assert.equal(
+    M.summary(weekStats(), 'steps'),
+    '31,200 steps · 6,240 a day on 5 active days',
+  )
+  assert.equal(
+    M.summary(weekStats(), 'calories'),
+    '1,291 kcal · 258 a day on 5 active days',
+  )
+  assert.equal(
+    M.summary(
+      {
+        period: 'day',
+        totals: { steps: 6012, kcal: 251.3 },
+        activeBuckets: 4,
+      },
+      'steps',
+    ),
+    '6,012 steps · 1,503 an hour in 4 active hours',
+  )
+  assert.equal(
+    M.summary(
+      { period: 'year', totals: { steps: 2600, kcal: 96 }, activeBuckets: 1 },
+      'steps',
+    ),
+    '2,600 steps · 2,600 a month in 1 active month',
+  )
+  assert.equal(M.summary(weekStats({ activeBuckets: 0 }), 'steps'), '')
+  assert.equal(M.summary(null, 'steps'), '')
+  assert.equal(M.hasActivity(weekStats()), true)
+  assert.equal(M.hasActivity(weekStats({ activeBuckets: 0 })), false)
+  assert.equal(M.weightHint(70), 'estimated for 70 kg')
+})
+
+test('linkText words every link situation for the header', () => {
+  const away = (linkDetail) =>
+    M.linkText(state({ link: 'disconnected', linkDetail, pad: null }))
+  assert.equal(M.linkText(state()), 'KS-ST-A1P · connected')
+  assert.equal(M.linkText(state({ bluetooth: 'off' })), 'Bluetooth is off')
+  assert.equal(M.linkText(state({ bluetooth: 'blocked' })), 'Bluetooth is off')
+  assert.equal(
+    M.linkText(state({ bluetooth: 'missing' })),
+    'No Bluetooth adapter',
+  )
+  assert.equal(
+    M.linkText(state({ bluetooth: 'unavailable' })),
+    'Bluetooth unavailable',
+  )
+  assert.equal(
+    M.linkText(state({ link: 'disconnected', device: null, pad: null })),
+    'No pad selected',
+  )
+  assert.equal(
+    M.linkText(state({ link: 'searching', pad: null })),
+    'Looking for KS-ST-A1P…',
+  )
+  assert.equal(
+    M.linkText(state({ link: 'connecting', pad: null })),
+    'Connecting to KS-ST-A1P…',
+  )
+  assert.equal(away('not-found'), "KS-ST-A1P isn't nearby")
+  assert.equal(away('paused'), 'Disconnected')
+  assert.equal(away('link-lost'), 'Lost the connection, retrying')
+  assert.equal(
+    away('unsupported-ftms'),
+    "KS-ST-A1P uses FTMS, which isn't supported yet",
+  )
+  assert.equal(
+    away('unsupported-ks-text'),
+    "KS-ST-A1P uses a protocol that isn't supported",
+  )
+  assert.equal(away('not-a-walkingpad'), "KS-ST-A1P isn't a WalkingPad")
+  assert.equal(away('connect-failed'), "Couldn't connect to KS-ST-A1P")
+  assert.equal(away(null), 'Disconnected')
+  assert.equal(
+    M.linkText(
+      state({
+        link: 'disconnected',
+        linkDetail: 'not-found',
+        device: { address: 'A', name: null },
+        pad: null,
+      }),
+    ),
+    "The pad isn't nearby",
+  )
+  assert.equal(M.linkText(null), '')
+})
+
+test('linkHint explains a missing pad and refusals without alarm', () => {
+  assert.match(
+    M.linkHint(
+      state({ link: 'disconnected', linkDetail: 'not-found', pad: null }),
+    ),
+    /phone app/,
+  )
+  assert.match(M.linkHint(state({ pad: pad({ imperial: true }) })), /miles/)
+  assert.match(M.linkHint(state({ pad: pad({ shared: true }) })), /Another app/)
+  assert.equal(M.linkHint(state()), '')
+  assert.equal(M.linkHint(null), '')
+})
+
+test('recentSession shows the last walk for 15 minutes', () => {
+  const last = { ...session, id: 11, endedAt: 1759561900 }
+  const s = state({ lastSession: last })
+  assert.equal(M.recentSession(s, 1759561900 + 60).id, 11)
+  assert.equal(M.recentSession(s, 1759561900 + 899).id, 11)
+  assert.equal(M.recentSession(s, 1759561900 + 900), null)
+  assert.equal(M.recentSession(s, 1759561900 - 5), null)
+  assert.equal(M.recentSession(state(), 0), null)
+})
+
+test('sessionLine and todayLine', () => {
+  assert.equal(
+    M.sessionLine({
+      activeS: 1800,
+      steps: 2600,
+      distanceM: 2100,
+      kcal: 96,
+    }),
+    '30:00 · 2,600 steps · 2.10 km · 96 kcal',
+  )
+  assert.equal(
+    M.sessionLine({ ...session, estimated: true }),
+    '12:34 · 1,023 steps · 0.87 km · 41 kcal · estimated',
+  )
+  assert.equal(
+    M.todayLine(state().today),
+    '251 kcal · 4.31 km · 1 h 5 min active',
+  )
+})
+
+test('speedRange disables the ends and auto mode', () => {
+  assert.deepEqual(plain(M.speedRange(state())), { slower: true, faster: true })
+  assert.deepEqual(
+    plain(M.speedRange(state({ pad: pad({ targetKmh: 0.5 }) }))),
+    { slower: false, faster: true },
+  )
+  assert.deepEqual(plain(M.speedRange(state({ pad: pad({ targetKmh: 6 }) }))), {
+    slower: true,
+    faster: false,
+  })
+  assert.deepEqual(plain(M.speedRange(state({ pad: pad({ mode: 'auto' }) }))), {
+    slower: false,
+    faster: false,
+  })
+  assert.deepEqual(plain(M.speedRange(null)), { slower: false, faster: false })
+})
+
+test('padActions offers what each pad situation allows', () => {
+  const ids = (s) => plain(M.padActions(s)).map((a) => a.id)
+  assert.deepEqual(ids(state({ bluetooth: 'blocked', pad: null })), [
+    'bluetoothOn',
+  ])
+  assert.deepEqual(ids(state({ bluetooth: 'missing', pad: null })), [])
+  assert.deepEqual(
+    ids(state({ link: 'disconnected', device: null, pad: null })),
+    ['scan'],
+  )
+  assert.deepEqual(
+    ids(
+      state({
+        link: 'disconnected',
+        device: null,
+        pad: null,
+        scan: { active: true, devices: [] },
+      }),
+    ),
+    ['stopScan'],
+  )
+  assert.deepEqual(ids(state()), ['slower', 'start', 'faster', 'disconnect'])
+  assert.deepEqual(ids(state({ pad: pad({ belt: 'running' }) })), ['stop'])
+  assert.deepEqual(ids(state({ pad: pad({ busy: 'starting' }) })), ['stop'])
+  assert.deepEqual(ids(state({ link: 'searching', pad: null })), ['disconnect'])
+  assert.deepEqual(ids(state({ link: 'disconnected', pad: null })), [
+    'connect',
+    'forget',
+  ])
+  assert.deepEqual(ids(null), [])
+  const start = M.padActions(state({ pad: pad({ targetKmh: 3 }) }))[1]
+  assert.equal(start.label, 'Start · 3.0 km/h')
+  assert.equal(start.enabled, true)
+  assert.equal(
+    M.padActions(state({ pad: pad({ imperial: true }) }))[1].enabled,
+    false,
+  )
+  assert.equal(
+    M.padActions(state({ pad: pad({ shared: true }) }))[1].enabled,
+    false,
+  )
+})
+
+test('scanRows lists pads first and hides the rest until asked', () => {
+  const devices = [
+    { address: 'A', name: 'KS-ST-A1P', rssi: -58, candidate: true },
+    { address: 'B', name: 'Some Headphones', rssi: -40, candidate: false },
+    { address: 'C', name: null, rssi: -80, candidate: false },
+    { name: 'no address', candidate: true },
+  ]
+  const s = state({ scan: { active: true, devices } })
+  const collapsed = M.scanRows(s, false)
+  assert.deepEqual(
+    plain(collapsed.rows).map((d) => d.address),
+    ['A'],
+  )
+  assert.equal(collapsed.hidden, 2)
+  const all = M.scanRows(s, true)
+  assert.deepEqual(
+    plain(all.rows).map((d) => d.address),
+    ['A', 'B', 'C'],
+  )
+  assert.equal(all.hidden, 0)
+  assert.equal(M.scanRows(null, false).rows.length, 0)
+})
+
+test('errorText words the pad refusals', () => {
+  assert.match(M.errorText({ code: 'imperial-units' }), /miles/)
+  assert.match(M.errorText({ code: 'in-use' }), /Another app/)
+})
