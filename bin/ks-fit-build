@@ -36,15 +36,6 @@ chmod 755 "$staged"
 # A running helper keeps its old inode.
 mv -f -T "$staged" "$dest/ks-fit"
 
-# Keep only the helper for this version.
-for old in "$data/helpers"/*/; do
-  old=${old%/}
-  if [[ $old != "$dest" ]]; then
-    rm -f -- "$old/ks-fit"
-    rmdir -- "$old" 2>/dev/null || true
-  fi
-done
-
 echo "Built $dest/ks-fit"
 
 # Let a running plugin pick the helper up without a Retry.
