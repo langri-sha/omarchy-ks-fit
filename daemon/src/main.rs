@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::pin::pin;
 use std::process::ExitCode;
 
 use anyhow::Context;
@@ -182,10 +183,19 @@ async fn run_daemon(simulate: bool, data_dir: Option<PathBuf>) -> ExitCode {
 async fn serve(simulate: bool, data_dir: Option<PathBuf>) -> Result<(), Fatal> {
     let mut terminate = signal(SignalKind::terminate()).map_err(Fatal::Signals)?;
     let mut interrupt = signal(SignalKind::interrupt()).map_err(Fatal::Signals)?;
+    let mut shutdown = pin!(async move {
+        tokio::select! {
+            _ = terminate.recv() => log::info!("terminated"),
+            _ = interrupt.recv() => log::info!("interrupted"),
+        }
+    });
     let dir = data_dir.or_else(default_data_dir).ok_or(Fatal::NoDataDir)?;
     let dir = store::prepare_data_dir(&dir)?;
     let runtime_dir = absolute_var("XDG_RUNTIME_DIR").map(|dir| dir.join(APP));
-    let _lock = daemon::lock(runtime_dir.as_ref().unwrap_or(&dir), simulate).await?;
+    let _lock = tokio::select! {
+        lock = daemon::lock(runtime_dir.as_ref().unwrap_or(&dir), simulate) => lock?,
+        () = &mut shutdown => return Ok(()),
+    };
 
     let now = Timestamp::now();
     let database = dir.join(if simulate { "demo.db" } else { "ks-fit.db" });
@@ -202,14 +212,7 @@ async fn serve(simulate: bool, data_dir: Option<PathBuf>) -> Result<(), Fatal> {
     };
     let mut daemon =
         Daemon::new(radio, tracker, tokio::io::stdin(), tokio::io::stdout())?.simulated(simulate);
-    daemon
-        .run(async move {
-            tokio::select! {
-                _ = terminate.recv() => log::info!("terminated"),
-                _ = interrupt.recv() => log::info!("interrupted"),
-            }
-        })
-        .await
+    daemon.run(shutdown).await
 }
 
 /// Prints the devices one scan finds, each once, until it ends.

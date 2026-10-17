@@ -9,9 +9,9 @@ use ks_fit::store::{Activity, Device, Store};
 use ks_fit::tracker::Tracker;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, duplex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, Instant, sleep, timeout_at};
+use tokio::time::{Duration, Instant, sleep, timeout, timeout_at};
 
 type Served = Daemon<DuplexStream, DuplexStream>;
 
@@ -691,4 +691,32 @@ async fn closing_stdin_closes_the_session_and_leaves_the_belt_running() {
             .all(|write| write.frame != Command::ChangeSpeed(0).encode())
     );
     assert_eq!(writes.last().unwrap().belt, Belt::Running);
+}
+
+#[tokio::test(start_paused = true)]
+async fn shuts_down_on_the_signal_while_the_shell_is_not_reading() {
+    let store = Store::open_in_memory().unwrap();
+    let tracker = Tracker::open(store, TimeZone::UTC, origin()).unwrap();
+    let (radio, _sim) = Radio::simulated();
+    let (mut input, daemon_input) = duplex(1 << 16);
+    let (daemon_output, _unread) = duplex(256);
+    let mut daemon = Daemon::new(radio, tracker, daemon_input, daemon_output)
+        .unwrap()
+        .with_clock(Clock::tokio(origin()));
+    let (stop, stopped) = oneshot::channel::<()>();
+    let served = tokio::spawn(async move {
+        daemon
+            .run(async {
+                let _ = stopped.await;
+            })
+            .await
+    });
+    for kg in 21..60 {
+        let line = format!("{}\n", json!({"cmd": "configure", "weightKg": kg}));
+        input.write_all(line.as_bytes()).await.unwrap();
+        sleep(Duration::from_millis(300)).await;
+    }
+    stop.send(()).unwrap();
+    let outcome = timeout(Duration::from_secs(2), served).await;
+    assert!(matches!(outcome, Ok(Ok(Ok(())))), "{outcome:?}");
 }
