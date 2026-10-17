@@ -205,3 +205,149 @@ test('statusJson is compact and null-safe', () => {
     today: null,
   })
 })
+
+test('formatInt groups thousands', () => {
+  assert.deepEqual(
+    [0, 7, 999, 1000, 1023, 31200, 1234567, -4210, 41.6, undefined].map((n) =>
+      M.formatInt(n),
+    ),
+    [
+      '0',
+      '7',
+      '999',
+      '1,000',
+      '1,023',
+      '31,200',
+      '1,234,567',
+      '-4,210',
+      '42',
+      '0',
+    ],
+  )
+})
+
+test('formatDuration switches to hours past an hour', () => {
+  assert.deepEqual(
+    [0, 5, 59, 754, 3599, 3600, 3900, 36061, -3, null].map((s) =>
+      M.formatDuration(s),
+    ),
+    [
+      '0:00',
+      '0:05',
+      '0:59',
+      '12:34',
+      '59:59',
+      '1:00:00',
+      '1:05:00',
+      '10:01:01',
+      '0:00',
+      '0:00',
+    ],
+  )
+})
+
+test('formatSpeed keeps one decimal', () => {
+  assert.deepEqual(
+    [3.5, 3, 0, 2.04, 5.96, undefined].map((v) => M.formatSpeed(v)),
+    ['3.5', '3.0', '0.0', '2.0', '6.0', '0.0'],
+  )
+})
+
+test('barText shows the session only while exercising', () => {
+  const running = state({ pad: pad({ belt: 'running' }), session })
+  assert.equal(M.barText(running), '12:34 · 1,023')
+  assert.equal(
+    M.barText(state({ pad: pad({ busy: 'starting' }), session: null })),
+    '0:00 · 0',
+  )
+  assert.equal(M.barText(state({ session })), '')
+  assert.equal(M.barText(null), '')
+})
+
+test('barSample is as wide as labels short of an hour', () => {
+  const running = state({ pad: pad({ belt: 'running' }), session })
+  assert.equal(M.barSample.length, M.barText(running).length)
+  assert.equal(M.barSample.replace(/0/g, '9'), '99:99 · 9,999')
+})
+
+test('linkSummary has a few words for every link situation', () => {
+  assert.equal(M.linkSummary(state()), 'connected')
+  assert.equal(
+    M.linkSummary(state({ bluetooth: 'blocked', pad: null })),
+    'Bluetooth is off',
+  )
+  assert.equal(M.linkSummary(state({ bluetooth: 'off' })), 'Bluetooth is off')
+  assert.equal(
+    M.linkSummary(state({ bluetooth: 'missing' })),
+    'no Bluetooth adapter',
+  )
+  assert.equal(
+    M.linkSummary(state({ bluetooth: 'unavailable' })),
+    'Bluetooth unavailable',
+  )
+  assert.equal(
+    M.linkSummary(state({ link: 'disconnected', device: null, pad: null })),
+    'no pad selected',
+  )
+  assert.equal(
+    M.linkSummary(state({ link: 'searching', pad: null })),
+    'looking for KS-ST-A1P',
+  )
+  assert.equal(
+    M.linkSummary(
+      state({ link: 'searching', device: { address: 'A' }, pad: null }),
+    ),
+    'looking for the pad',
+  )
+  assert.equal(
+    M.linkSummary(state({ link: 'connecting', pad: null })),
+    'connecting',
+  )
+  assert.equal(
+    M.linkSummary(state({ link: 'disconnected', pad: null })),
+    'disconnected',
+  )
+  assert.equal(M.linkSummary(null), '')
+})
+
+test('tooltip is one line for every helper and link situation', () => {
+  assert.equal(
+    M.tooltip(state(), 'ready'),
+    'KS Fit — connected · 6,012 steps today',
+  )
+  assert.equal(
+    M.tooltip(state({ today: { steps: 0 } }), 'ready'),
+    'KS Fit — connected',
+  )
+  assert.equal(
+    M.tooltip(
+      state({ pad: pad({ belt: 'running', speedKmh: 3.5 }), session }),
+      'ready',
+    ),
+    'KS Fit — walking at 3.5 km/h · 12:34 · 1,023 steps',
+  )
+  assert.equal(
+    M.tooltip(state({ pad: pad({ busy: 'starting' }) }), 'ready'),
+    'KS Fit — starting the belt',
+  )
+  assert.equal(M.tooltip(null, 'ready'), 'KS Fit')
+  assert.equal(
+    M.tooltip(null, 'missing'),
+    'KS Fit — the helper is not built yet',
+  )
+  assert.equal(
+    M.tooltip(state(), 'stale'),
+    'KS Fit — restart the shell to finish updating',
+  )
+  assert.equal(M.tooltip(null, undefined), 'KS Fit — starting the helper')
+  for (const status of ['starting', 'missing', 'outdated', 'failed', 'stale'])
+    assert.ok(!M.tooltip(state(), status).includes('\n'))
+})
+
+test('glyphs are Material Design code points', () => {
+  for (const glyph of Object.values(M.glyphs)) {
+    const cp = glyph.codePointAt(0)
+    assert.ok(cp >= 0xf0001 && cp <= 0xf1af0, glyph)
+  }
+  assert.equal(M.glyphs.walk, '\u{F0583}')
+})
