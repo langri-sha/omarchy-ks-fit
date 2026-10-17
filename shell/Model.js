@@ -164,6 +164,26 @@ function tooltip(state, helperStatus) {
   return steps > 0 ? text + ' · ' + formatInt(steps) + ' steps today' : text
 }
 
+// Why a belt command can't go out right now, in the daemon's error codes, or
+// '' when it can. `stop` only ever needs a link.
+function beltBlocker(helper, state, cmd) {
+  if (helper !== 'ready') return 'helper-' + helper
+  if (
+    state &&
+    (state.bluetooth === 'off' || state.bluetooth === 'blocked') &&
+    !connected(state)
+  )
+    return 'bluetooth-off'
+  if (!connected(state)) return 'not-connected'
+  if (cmd === 'stop') return ''
+  if (exercising(state)) return ''
+  var pad = state.pad
+  if (pad.imperial === true) return 'imperial-units'
+  if (pad.shared === true) return 'in-use'
+  if (pad.busy) return 'busy'
+  return ''
+}
+
 function isPeriod(period) {
   return periods.indexOf(period) !== -1
 }
