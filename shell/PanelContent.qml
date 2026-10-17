@@ -43,12 +43,15 @@ Item {
   }
 
   // One cursor for keyboard and mouse, bluetooth-panel style: nothing is lit
-  // until the first arrow key or hover. Start only answers a cursor that
-  // arrow keys moved there (cursorByArrows).
+  // until the first arrow key or hover.
   property bool cursorActive: false
-  property bool cursorByArrows: false
   property string focusSection: ""
   property int selectedIndex: 0
+  // The control the last arrow press landed on. Start answers Enter or Space
+  // only while the cursor still sits on that very control: not after a hover,
+  // not after an arrow press that went nowhere, and not when the row under the
+  // cursor changed since.
+  property string arrowTarget: ""
 
   function sections() {
     var list = []
@@ -63,6 +66,11 @@ Item {
     return -1
   }
 
+  function controlAt(section, index) {
+    if (section === "view" || section === "helper") return section + ":" + index
+    return activeView.controlId(section, index)
+  }
+
   function hasCursor(section, index) {
     return cursorActive && focusSection === section && selectedIndex === index
   }
@@ -74,14 +82,14 @@ Item {
   function hoverCursor(section, index, on) {
     if (!on) return
     cursorActive = true
-    cursorByArrows = false
+    arrowTarget = ""
     focusSection = section
     selectedIndex = index
   }
 
   function resetCursor() {
     cursorActive = false
-    cursorByArrows = false
+    arrowTarget = ""
     var list = sections()
     focusSection = list.length > 0 ? list[0].name : ""
     selectedIndex = 0
@@ -97,9 +105,15 @@ Item {
   }
 
   function moveCursor(dx, dy) {
+    var before = cursorActive + ":" + focusSection + ":" + selectedIndex
+    stepCursor(dx, dy)
+    if (cursorActive && cursorActive + ":" + focusSection + ":" + selectedIndex !== before)
+      arrowTarget = controlAt(focusSection, selectedIndex)
+  }
+
+  function stepCursor(dx, dy) {
     var list = sections()
     if (list.length === 0) return
-    cursorByArrows = true
     if (!cursorActive) {
       normalizeCursor()
       cursorActive = true
@@ -137,7 +151,8 @@ Item {
     if (!cursorActive) return
     if (focusSection === "view") setView(views[selectedIndex].value)
     else if (focusSection === "helper") banner.activate(selectedIndex)
-    else activeView.activate(focusSection, selectedIndex, cursorByArrows)
+    else activeView.activate(focusSection, selectedIndex,
+                             arrowTarget !== "" && arrowTarget === controlAt(focusSection, selectedIndex))
   }
 
   // Every key here is harmless except the stop keys; none of them starts

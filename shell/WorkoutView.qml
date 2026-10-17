@@ -41,10 +41,15 @@ Column {
     }
   }
 
-  function activate(section, index, byArrows) {
+  function controlId(section, index) {
+    var control = section === "speed" ? controls[index] : null
+    return control ? "speed:" + control.id : ""
+  }
+
+  function activate(section, index, armed) {
     var control = controls[index]
     if (section !== "speed" || !control) return
-    if (control.id === "start" && !byArrows) return
+    if (control.id === "start" && !armed) return
     run(control)
   }
 

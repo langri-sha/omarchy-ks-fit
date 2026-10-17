@@ -58,13 +58,17 @@ Column {
   function shiftRange(delta) { if (service) service.shiftRange(delta) }
   function adjustWeight(delta) { if (service) service.setWeight(Math.round(service.weightKg) + delta) }
 
-  function activate(section, index, byArrows) {
+  function controlId(section, index) {
+    return section === "pad" || section === "scan" ? pad.controlId(section, index) : section + ":" + index
+  }
+
+  function activate(section, index, armed) {
     switch (section) {
       case "period": selectPeriod(periods[index].value); break
       case "metric": selectMetric(metrics[index].value); break
       case "range": shiftRange(index === 0 ? -1 : 1); break
       case "weight": adjustWeight(index === 0 ? -1 : 1); break
-      default: pad.activate(section, index, byArrows)
+      default: pad.activate(section, index, armed)
     }
   }
 
