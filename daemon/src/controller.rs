@@ -1170,6 +1170,19 @@ mod tests {
     }
 
     #[test]
+    fn start_in_auto_mode_switches_to_manual_first() {
+        let mut bench = Bench::obeying(status(Belt::Idle, Mode::Auto, 0));
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.run(secs(3));
+        assert_eq!(
+            bench.commands(),
+            [Command::SwitchToManual, Command::StartBelt]
+        );
+        assert_eq!(bench.view().mode, Mode::Manual);
+    }
+
+    #[test]
     fn start_in_manual_mode_goes_straight_to_start_belt() {
         let mut bench = Bench::obeying(idle());
         bench.run(secs(2));
