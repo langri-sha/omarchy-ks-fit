@@ -24,6 +24,7 @@ CREATE TABLE sessions (
   distance_m INTEGER NOT NULL DEFAULT 0,
   kcal REAL NOT NULL DEFAULT 0,
   max_kmh REAL NOT NULL DEFAULT 0,
+  estimated INTEGER NOT NULL DEFAULT 0,
   device TEXT
 ) STRICT;
 CREATE INDEX sessions_started_at ON sessions (started_at);
@@ -47,7 +48,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT, WITHOU
 "];
 
 const SESSION: &str =
-    "id, started_at, ended_at, updated_at, active_s, steps, distance_m, kcal, max_kmh";
+    "id, started_at, ended_at, updated_at, active_s, steps, distance_m, kcal, max_kmh, estimated";
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -181,6 +182,9 @@ pub struct Session {
     pub ended_at: Option<Timestamp>,
     pub activity: Activity,
     pub max_kmh: f64,
+    /// Whether the session was caught up long after the pad was last seen,
+    /// so that only its activity is known, not when it happened.
+    pub estimated: bool,
 }
 
 impl Session {
@@ -374,8 +378,8 @@ impl Store {
         let activity = &session.activity;
         self.conn.execute(
             "INSERT INTO sessions (started_at, ended_at, updated_at, active_s, steps, distance_m,
-               kcal, max_kmh, device)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               kcal, max_kmh, estimated, device)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 session.started_at.as_second(),
                 session.ended_at.map(Timestamp::as_second),
@@ -385,6 +389,7 @@ impl Store {
                 activity.distance_m,
                 activity.kcal,
                 session.max_kmh,
+                session.estimated,
                 device
             ],
         )?;
@@ -525,6 +530,7 @@ fn session(row: &Row<'_>) -> rusqlite::Result<Session> {
         updated_at: timestamp(3, row.get(3)?)?,
         activity: activity(row, 4)?,
         max_kmh: row.get(8)?,
+        estimated: row.get(9)?,
     })
 }
 
@@ -596,6 +602,7 @@ mod tests {
             ended_at: None,
             activity: walk(90, 4.2),
             max_kmh: 3.5,
+            estimated: false,
         }
     }
 
@@ -981,7 +988,10 @@ mod tests {
     #[test]
     fn sessions_round_trip() {
         let store = Store::open_in_memory().unwrap();
-        let mut session = open_session(1_000, 1_600);
+        let mut session = Session {
+            estimated: true,
+            ..open_session(1_000, 1_600)
+        };
         session.id = store.insert_session(&session, "pad-1").unwrap();
         session.activity = walk(900, 40.0);
         session.updated_at = at(1_900);
