@@ -1,14 +1,14 @@
 //! A simulated adapter and pad that speak real frames.
 
 use std::cmp::Ordering;
-use std::future;
 
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Duration, Instant, sleep_until};
+use tokio::time::{Duration, Instant};
 
 use super::{
     AdapterState, Call, ConnectFailure, LinkId, NOTIFY_CHARACTERISTIC, RadioEvent,
     WALKINGPAD_SERVICE, WRITE_CHARACTERISTIC, bluetooth_uuid, classify, is_candidate,
+    sleep_until_some,
 };
 use crate::protocol::{Belt, checksum};
 
@@ -385,13 +385,6 @@ impl Sim {
         if self.events.send(event).is_err() {
             log::debug!("nobody listens to the simulator");
         }
-    }
-}
-
-async fn sleep_until_some(at: Option<Instant>) {
-    match at {
-        Some(at) => sleep_until(at).await,
-        None => future::pending().await,
     }
 }
 
