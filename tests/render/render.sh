@@ -28,6 +28,9 @@ for stub in omarchy-notification-send omarchy-bluetooth-power omarchy-restart-sh
   chmod +x "$tmp/bin/$stub"
 done
 : >"$tmp/calls.log"
+if ((mock)); then
+  : >"$tmp/held-lock"
+fi
 
 PATH="$tmp/bin:$PATH" \
   PLUGIN_DIR="$root" \
@@ -35,6 +38,7 @@ PATH="$tmp/bin:$PATH" \
   KS_FIT_HELPER="$tmp/helper/ks-fit" \
   KS_FIT_RENDER_SOURCE="$source" \
   KS_FIT_RENDER_MOCK="$mock" \
+  KS_FIT_MOCK_HELD_LOCK="$tmp/held-lock" \
   XDG_DATA_HOME="$tmp/data" \
   XDG_STATE_HOME="$tmp/state" \
   XDG_CONFIG_HOME="$tmp/xdg-config" \

@@ -250,11 +250,12 @@ QtObject {
     }
   }
 
+  // A held lock comes from a helper that is in place and waits for its
+  // predecessor: it is starting now, even after `missing` or `outdated`, and
+  // helperStopped retries it.
   function handleFatal(message) {
-    var next = Model.helperForFatal(message.code)
-    lockHeld = next === "starting"
-    if (lockHeld) return
-    helper = next
+    helper = Model.helperForFatal(message.code)
+    lockHeld = helper === "starting"
     if (helper === "failed") helperError = String(message.message || message.code || "The helper stopped")
   }
 
