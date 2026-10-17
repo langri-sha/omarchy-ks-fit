@@ -46,6 +46,8 @@ pub enum Failure {
     Busy,
     #[error("the pad is in auto mode")]
     AutoMode,
+    #[error("the pad is set to imperial units")]
+    ImperialUnits,
     #[error("the pad did not start the belt")]
     StartNotAcknowledged,
     #[error("the pad did not switch to manual mode")]
@@ -62,6 +64,7 @@ impl Failure {
             Failure::NotConnected => "not-connected",
             Failure::Busy => "busy",
             Failure::AutoMode => "auto-mode",
+            Failure::ImperialUnits => "imperial-units",
             Failure::StartNotAcknowledged => "start-not-acknowledged",
             Failure::ModeNotAcknowledged => "mode-not-acknowledged",
             Failure::StopNotAcknowledged => "stop-not-acknowledged",
@@ -101,6 +104,7 @@ pub struct PadView {
     pub min_kmh: f64,
     pub max_kmh: f64,
     pub busy: Option<Busy>,
+    pub imperial: bool,
 }
 
 /// The belt state machine for one link. Drop it when the link goes away:
@@ -109,6 +113,7 @@ pub struct PadView {
 pub struct Controller {
     target: u8,
     max: u8,
+    imperial: bool,
     status: Option<(Instant, Status)>,
     heard: Instant,
     writable: Instant,
@@ -183,6 +188,7 @@ impl Controller {
                 .unwrap_or(MIN_DKMH)
                 .clamp(MIN_DKMH, FALLBACK_MAX_DKMH),
             max: FALLBACK_MAX_DKMH,
+            imperial: false,
             status: None,
             heard: now,
             writable: now,
@@ -228,6 +234,12 @@ impl Controller {
 
     pub fn on_prefs(&mut self, prefs: &Prefs) -> Vec<Action> {
         let mut actions = Vec::new();
+        self.imperial = prefs.imperial;
+        if prefs.imperial {
+            log::warn!(
+                "the pad is set to imperial units; refusing to start it or change its speed"
+            );
+        }
         if prefs.max_dkmh < MIN_DKMH {
             log::warn!(
                 "ignoring the pad's maximum speed of {}",
@@ -300,6 +312,7 @@ impl Controller {
                 Some(Op::Stop(_)) => Some(Busy::Stopping),
                 _ => None,
             },
+            imperial: self.imperial,
         })
     }
 
@@ -344,6 +357,7 @@ impl Controller {
             (_, Belt::Unknown(_)) => return Err(Failure::Busy),
             _ => {}
         }
+        self.may_drive()?;
         if self.idle_polls_before_start > 0 {
             return Err(Failure::Busy);
         }
@@ -374,6 +388,7 @@ impl Controller {
         nudging_up: bool,
         actions: &mut Vec<Action>,
     ) -> Result<(), Failure> {
+        self.may_drive()?;
         if status.mode == Mode::Auto {
             return Err(Failure::AutoMode);
         }
@@ -387,6 +402,14 @@ impl Controller {
             self.op = self.apply_target(status);
         }
         Ok(())
+    }
+
+    fn may_drive(&self) -> Result<(), Failure> {
+        if self.imperial {
+            Err(Failure::ImperialUnits)
+        } else {
+            Ok(())
+        }
     }
 
     /// Whether the pad is running in manual mode at a speed other than the target.
@@ -1539,6 +1562,31 @@ mod tests {
     }
 
     #[test]
+    fn an_imperial_pad_refuses_start_and_speed_but_still_stops() {
+        let mut bench = Bench::obeying(running(30));
+        bench.prefs = Some(Prefs {
+            max_dkmh: 60,
+            imperial: true,
+        });
+        bench.run(secs(1));
+        assert!(bench.view().imperial);
+        bench.request(Request::SetTarget(3.0));
+        bench.request(Request::Stop);
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.request(Request::Toggle);
+        assert_eq!(
+            bench.failures(),
+            [
+                (Request::SetTarget(3.0), Failure::ImperialUnits),
+                (Request::Start, Failure::ImperialUnits),
+                (Request::Toggle, Failure::ImperialUnits)
+            ]
+        );
+        assert_eq!(bench.commands(), [Command::ChangeSpeed(0)]);
+    }
+
+    #[test]
     fn the_watchdog_declares_the_link_dead_after_10_s_without_a_status() {
         let mut bench = Bench::obeying(idle());
         bench.run(ms(500));
@@ -1619,6 +1667,7 @@ mod tests {
             (Failure::NotConnected, "not-connected"),
             (Failure::Busy, "busy"),
             (Failure::AutoMode, "auto-mode"),
+            (Failure::ImperialUnits, "imperial-units"),
             (Failure::StartNotAcknowledged, "start-not-acknowledged"),
             (Failure::ModeNotAcknowledged, "mode-not-acknowledged"),
             (Failure::StopNotAcknowledged, "stop-not-acknowledged"),
