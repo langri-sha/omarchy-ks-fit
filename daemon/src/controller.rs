@@ -291,6 +291,24 @@ impl Controller {
         actions
     }
 
+    /// Reports the start or stop that goes down with the link, so the shell
+    /// learns the belt may not do what was asked. A countdown already
+    /// acknowledged the start, and a stop reported as failed stays reported.
+    pub fn abandon(&mut self) -> Vec<Action> {
+        let mut actions = Vec::new();
+        match self.op.take() {
+            Some(Op::Stop(stopping)) if !stopping.reported => {
+                self.fail(stopping.origin, Failure::StopNotAcknowledged, &mut actions);
+            }
+            Some(Op::Start {
+                origin,
+                step: Step::Manual(_) | Step::Belt(_),
+            }) => self.fail(origin, Failure::StartNotAcknowledged, &mut actions),
+            _ => {}
+        }
+        actions
+    }
+
     /// When [`Controller::on_tick`] has something to do next.
     pub fn next_deadline(&self) -> Option<Instant> {
         if self.dead {
@@ -582,7 +600,7 @@ impl Controller {
         if now >= self.heard + WATCHDOG {
             log::warn!("no status from the pad for {} s", WATCHDOG.as_secs());
             self.dead = true;
-            self.op = None;
+            actions.extend(self.abandon());
             actions.push(Action::LinkDead);
             return;
         }
@@ -1854,6 +1872,104 @@ mod tests {
         assert_eq!(bench.controller.next_deadline(), None);
         bench.request(Request::Stop);
         assert_eq!(bench.failures(), [(Request::Stop, Failure::NotConnected)]);
+    }
+
+    #[test]
+    fn the_watchdog_reports_a_stop_in_flight_before_declaring_the_link_dead() {
+        let mut bench = Bench::obeying(running(40));
+        bench.run(ms(500));
+        bench.pad = None;
+        bench.run(secs(5));
+        bench.request(Request::Stop);
+        bench.run(secs(10));
+        let outcome: Vec<Action> = bench
+            .log
+            .iter()
+            .map(|(_, action)| *action)
+            .filter(|action| matches!(action, Action::Fail { .. } | Action::LinkDead))
+            .collect();
+        assert_eq!(
+            outcome,
+            [
+                Action::Fail {
+                    request: Request::Stop,
+                    failure: Failure::StopNotAcknowledged
+                },
+                Action::LinkDead
+            ]
+        );
+    }
+
+    #[test]
+    fn abandoning_a_stop_in_flight_reports_it_once() {
+        let mut bench = Bench::stubborn(running(40));
+        bench.run(secs(2));
+        bench.request(Request::Stop);
+        bench.run(secs(1));
+        let abandoned = bench.controller.abandon();
+        bench.apply(abandoned);
+        let again = bench.controller.abandon();
+        bench.apply(again);
+        assert_eq!(
+            bench.failures(),
+            [(Request::Stop, Failure::StopNotAcknowledged)]
+        );
+    }
+
+    #[test]
+    fn abandoning_a_stop_already_reported_adds_nothing() {
+        let mut bench = Bench::stubborn(running(40));
+        bench.run(secs(2));
+        bench.request(Request::Stop);
+        bench.run(secs(10));
+        let abandoned = bench.controller.abandon();
+        bench.apply(abandoned);
+        assert_eq!(
+            bench.failures(),
+            [(Request::Stop, Failure::StopNotAcknowledged)]
+        );
+    }
+
+    #[test]
+    fn abandoning_a_start_the_belt_has_not_acted_on_reports_it_as_the_request() {
+        let mut bench = Bench::stubborn(idle());
+        bench.run(secs(2));
+        bench.request(Request::Toggle);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::StartBelt]);
+        let abandoned = bench.controller.abandon();
+        bench.apply(abandoned);
+        assert_eq!(
+            bench.failures(),
+            [(Request::Toggle, Failure::StartNotAcknowledged)]
+        );
+    }
+
+    #[test]
+    fn abandoning_a_start_waiting_for_manual_mode_reports_it() {
+        let mut bench = Bench::stubborn(standby());
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.run(secs(1));
+        assert_eq!(bench.commands(), [Command::SwitchToManual]);
+        let abandoned = bench.controller.abandon();
+        bench.apply(abandoned);
+        assert_eq!(
+            bench.failures(),
+            [(Request::Start, Failure::StartNotAcknowledged)]
+        );
+    }
+
+    #[test]
+    fn abandoning_a_countdown_reports_nothing() {
+        let mut bench = Bench::obeying(idle());
+        bench.run(secs(2));
+        bench.request(Request::Start);
+        bench.run(secs(1));
+        assert_eq!(bench.view().belt, Belt::Starting);
+        let abandoned = bench.controller.abandon();
+        bench.apply(abandoned);
+        assert_eq!(bench.failures(), []);
     }
 
     #[test]

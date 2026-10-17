@@ -438,6 +438,31 @@ async fn a_dropped_link_reconnects_into_the_same_session_without_touching_the_be
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_link_lost_while_the_belt_stops_reports_the_stop_as_not_acknowledged() {
+    let mut shell = Shell::start();
+    shell.greeted().await;
+    shell.link().await;
+    shell.send(json!({"cmd": "speed", "kmh": 4.0})).await;
+    shell.walk().await;
+    shell
+        .state("the belt runs at 4 km/h", |s| s["pad"]["speedKmh"] == 4.0)
+        .await;
+
+    shell.send(json!({"cmd": "stop"})).await;
+    shell
+        .state("the belt is stopping", |s| s["pad"]["busy"] == "stopping")
+        .await;
+    shell.sim.drop_link();
+    let seen = shell.watch(Duration::from_secs(5)).await;
+    assert_eq!(
+        errors(&seen),
+        [("stop-not-acknowledged".to_owned(), json!("stop"))]
+    );
+    let (_, after) = states(&seen).next().unwrap();
+    assert_eq!(after["pad"], Value::Null);
+}
+
+#[tokio::test(start_paused = true)]
 async fn forgetting_the_pad_drops_the_link_and_stops_reconnecting() {
     let mut shell = Shell::start();
     shell.greeted().await;

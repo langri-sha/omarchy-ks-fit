@@ -816,10 +816,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Daemon<R, W> {
         self.radio.disconnect();
     }
 
-    /// Forgets the link or attempt; a link that was up closes its session.
+    /// Forgets the link or attempt; a link that was up reports the start or
+    /// stop it leaves unfinished and closes its session.
     fn leave(&mut self) {
-        if let Link::Up(up) = mem::replace(&mut self.link, Link::Down) {
+        if let Link::Up(mut up) = mem::replace(&mut self.link, Link::Down) {
             log::info!("unlinked from {}", up.address);
+            let abandoned = up.controller.abandon();
+            self.act(abandoned);
             if let Err(error) = self.tracker.on_link_lost() {
                 log::error!("cannot close the session: {error:#}");
             }
