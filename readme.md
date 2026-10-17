@@ -52,10 +52,12 @@ omarchy plugin add https://github.com/langri-sha/omarchy-ks-fit.git --enable
 The plugin can't talk to the pad until its helper is built. Open the KS Fit
 panel from the bar and choose **Build helper**: a terminal compiles the helper
 from the plugin's own Rust source with cargo, which takes a couple of minutes.
-Nothing leaves the machine except crate downloads. The binary goes to
-`~/.local/share/omarchy-ks-fit/helpers/<version>/ks-fit`, and the panel picks it
-up as soon as the build finishes. After an update that changes the version, the
-panel asks for a rebuild.
+The build downloads the crates it needs, and with rustup the first build may
+also fetch the stable toolchain with clippy and rustfmt, as
+`rust-toolchain.toml` pins them; nothing else goes over the network. The binary
+goes to `~/.local/share/omarchy-ks-fit/helpers/<version>/ks-fit`, and the panel
+picks it up as soon as the build finishes. After an update that changes the
+version, the panel asks for a rebuild.
 
 Because of this build step, the plugin marketplace may list KS Fit as "Manual
 setup".
