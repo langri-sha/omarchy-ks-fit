@@ -6,7 +6,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavio
 use std::fmt::Display;
 use std::fs::{self, DirBuilder};
 use std::io;
-use std::ops::Range;
+use std::iter::Sum;
+use std::ops::{AddAssign, Range};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -142,6 +143,24 @@ pub struct Activity {
     pub steps: u32,
     pub distance_m: u32,
     pub kcal: f64,
+}
+
+impl AddAssign for Activity {
+    fn add_assign(&mut self, other: Activity) {
+        self.active_s = self.active_s.saturating_add(other.active_s);
+        self.steps = self.steps.saturating_add(other.steps);
+        self.distance_m = self.distance_m.saturating_add(other.distance_m);
+        self.kcal += other.kcal;
+    }
+}
+
+impl Sum for Activity {
+    fn sum<I: Iterator<Item = Activity>>(activities: I) -> Activity {
+        activities.fold(Activity::default(), |mut total, activity| {
+            total += activity;
+            total
+        })
+    }
 }
 
 /// A stretch of consecutive walking.
@@ -986,6 +1005,25 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(store.sessions_started(at(1_000)..at(2_000)).unwrap(), 2);
+    }
+
+    #[test]
+    fn activity_adds_up_without_overflowing() {
+        let mut total: Activity = [walk(100, 4.0), walk(20, 0.5)].into_iter().sum();
+        assert_eq!(
+            total,
+            Activity {
+                active_s: 120,
+                steps: 120,
+                distance_m: 90,
+                kcal: 4.5
+            }
+        );
+        total += Activity {
+            steps: u32::MAX,
+            ..Activity::default()
+        };
+        assert_eq!(total.steps, u32::MAX);
     }
 
     #[test]
