@@ -19,7 +19,7 @@ BorderSurface {
   signal hovered(int index, bool isHovered)
 
   readonly property string status: service ? service.helperStatus : "starting"
-  readonly property bool exercising: !!service && service.exercising
+  readonly property bool mayBeMoving: !!service && service.mayBeMoving
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property string buildPath: decodeURIComponent(String(Qt.resolvedUrl("../bin/ks-fit-build")).replace(/^file:\/\//, ""))
 
@@ -32,7 +32,7 @@ BorderSurface {
       case "failed":
         return [{ id: "retry", label: "Retry", icon: Model.glyphs.retry }]
       case "stale":
-        return [{ id: "restart", label: "Restart shell", icon: Model.glyphs.restart, enabled: !exercising }]
+        return [{ id: "restart", label: "Restart shell", icon: Model.glyphs.restart, enabled: !mayBeMoving }]
     }
     return []
   }
@@ -53,7 +53,7 @@ BorderSurface {
       case "failed":
         return service && service.helperError !== "" ? service.helperError : "It exited repeatedly."
       case "stale":
-        return exercising ? "KS Fit was updated. Stop the belt first: restarting drops the panel for a moment."
+        return mayBeMoving ? "KS Fit was updated. Stop the belt first: restarting drops the panel for a moment."
           : "KS Fit was updated while the shell kept running the previous version."
     }
     return ""

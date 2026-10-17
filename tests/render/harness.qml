@@ -176,6 +176,16 @@ ShellRoot {
     })
   }
 
+  function findButton(item, label) {
+    if (!item || !item.visible) return null
+    if (typeof item.text === "string" && item.text.indexOf(label) === 0 && typeof item.iconText === "string") return item
+    for (var i = 0; i < item.children.length; i++) {
+      var found = findButton(item.children[i], label)
+      if (found) return found
+    }
+    return null
+  }
+
   function snapshot() { return service ? service.state : null }
   function pad() { var s = snapshot(); return s && s.pad ? s.pad : null }
 
@@ -501,9 +511,31 @@ ShellRoot {
         else if (!service.mayBeMoving) fail("a lost link cleared the moving latch")
         else if (!service.demoBlocked) fail("a lost link dropped the demo notice")
         else grab([[card, "link-lost-walking"]], function() {
-          service.reconnect()
+          service.manifest = { version: "0.0.0-stale" }
           done()
         })
+      }
+    },
+    {
+      name: "restart held after a lost link",
+      mockOnly: true,
+      until: function() { return service.helperStatus === "stale" },
+      settle: 300,
+      run: function(done) {
+        var restart = findButton(card.content, "Restart shell")
+        if (!restart) {
+          fail("the stale banner has no Restart shell")
+          return
+        }
+        if (restart.enabled) {
+          fail("Restart shell was live after a lost link mid-walk")
+          return
+        }
+        card.content.hoverCursor("helper", 0, true)
+        card.content.activateCursor()
+        service.manifest = harness.manifest
+        service.reconnect()
+        done()
       }
     },
     {
