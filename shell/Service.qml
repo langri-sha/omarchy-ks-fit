@@ -45,6 +45,11 @@ QtObject {
   readonly property bool exercising: Model.exercising(state)
   // Outlives `state`: see Model.mayBeMoving.
   property bool mayBeMoving: false
+  // When the belt last came to rest, and the time as of the latest snapshot or
+  // the end of the Start hold that follows, both in ms: Model.padActions can't
+  // read the clock, and a binding on Date.now() never runs again.
+  property real stoppedAt: 0
+  property real clock: 0
   readonly property var pad: connected ? state.pad : null
   readonly property var today: state && state.today ? state.today : null
   readonly property real weightKg: Model.weightFor(state, settingsWeightKg)
@@ -266,7 +271,14 @@ QtObject {
 
   function handleState(message) {
     var closed = state !== null && Model.sessionMark(message) !== Model.sessionMark(state)
-    mayBeMoving = Model.mayBeMoving(mayBeMoving, message)
+    var now = Date.now()
+    var moving = Model.mayBeMoving(mayBeMoving, message)
+    if (mayBeMoving && !moving) {
+      stoppedAt = now
+      startHoldTimer.restart()
+    }
+    clock = now
+    mayBeMoving = moving
     state = message
     if (Model.connected(message) && !Model.exercising(message)) stopFailure = ""
     if (closed) refreshStats()
@@ -390,6 +402,12 @@ QtObject {
   readonly property Timer uptimeTimer: Timer {
     interval: 30000
     onTriggered: root.attempts = 0
+  }
+
+  readonly property Timer startHoldTimer: Timer {
+    interval: Model.startHoldMs
+    // Never short of the hold, or Start would wait for the next snapshot.
+    onTriggered: root.clock = Math.max(Date.now(), root.stoppedAt + Model.startHoldMs)
   }
 
   readonly property Timer noticeTimer: Timer {

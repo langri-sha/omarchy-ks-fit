@@ -848,6 +848,25 @@ test('padActions offers what each pad situation allows', () => {
   )
 })
 
+test('padActions holds Start for 3 s after the belt comes to rest', () => {
+  const start = (stoppedAt, now) =>
+    M.padActions(state(), stoppedAt, now).find((a) => a.id === 'start')
+  assert.equal(M.startHoldMs, 3000)
+  assert.equal(start(10000, 10000).enabled, false)
+  assert.equal(start(10000, 12999).enabled, false)
+  assert.equal(start(10000, 13000).enabled, true)
+  assert.equal(start(0, 10000).enabled, true)
+  assert.equal(start(undefined, undefined).enabled, true)
+  const walking = plain(
+    M.padActions(state({ pad: pad({ belt: 'running' }) }), 10000, 10000),
+  )
+  assert.deepEqual(
+    walking.map((a) => a.id),
+    ['stop'],
+  )
+  assert.notEqual(walking[0].enabled, false)
+})
+
 test('scanRows lists pads first and hides the rest until asked', () => {
   const devices = [
     { address: 'A', name: 'KS-ST-A1P', rssi: -58, candidate: true },

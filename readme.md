@@ -125,7 +125,8 @@ You're standing on the thing, so KS Fit refuses to surprise you:
 - It never starts the belt on its own: not on connect or reconnect, not after a
   restart, not from a hover, a scroll or a key on a freshly opened panel. Start
   takes a click, `Enter` or `Space` on a Start you moved to with the arrow keys,
-  or the `start`/`toggle` command.
+  or the `start`/`toggle` command. The panel's Start stays off for 3 s after the
+  belt comes to rest, so a second click meant for Stop doesn't start it again.
 - Stop is always available while the pad is connected: in the panel, with
   `Backspace` or `0`, and over IPC. If the pad doesn't confirm a stop, the panel
   and a notification tell you to use the remote.
