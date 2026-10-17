@@ -41,11 +41,12 @@ cargo clippy --locked --all-targets -- -D warnings
   `target/render`. It starts the real `Service.qml` with no helper, grabs the
   build banner, places `tests/render/mock-ks-fit` where the launcher looks and
   retries, then walks through scanning, connecting, every period and metric, a
-  walk, a stale-QML update, Bluetooth off, a pad out of range and demo mode.
-  Along the way it checks that a hovered Start doesn't start the belt, that
-  arrow keys reach it, and that `Backspace` stops it. It prints `HARNESS ok` at
-  the end. Desktop commands such as `omarchy-notification-send` are stubbed on
-  `PATH`, and a call to any of them fails the run.
+  walk, a stale-QML update, Bluetooth off, a pad out of range, a link lost
+  mid-walk and demo mode. Along the way it checks that a hovered Start doesn't
+  start the belt, that arrow keys reach it, that `Backspace` stops it, and that
+  a demo switch waits through the lost link. It prints `HARNESS ok` at the end.
+  Desktop commands such as `omarchy-notification-send` are stubbed on `PATH`,
+  and a call to any of them fails the run.
 - `KS_FIT_RENDER_HELPER=target/debug/ks-fit pnpm plugin:render` drives the real
   helper instead, in demo mode and with its data under a temp dir; the steps
   that need the mock's `{"cmd":"mock",…}` controls are skipped.

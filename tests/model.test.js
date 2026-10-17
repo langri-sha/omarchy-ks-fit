@@ -143,6 +143,41 @@ test('exercising covers the start sequence and a moving belt', () => {
   assert.equal(M.exercising(null), false)
 })
 
+test('mayBeMoving is set by a moving belt and cleared only by one seen at rest', () => {
+  const walking = state({ pad: pad({ belt: 'running' }) })
+  const lost = state({
+    link: 'disconnected',
+    linkDetail: 'link-lost',
+    pad: null,
+  })
+  assert.equal(M.mayBeMoving(false, walking), true)
+  assert.equal(
+    M.mayBeMoving(false, state({ pad: pad({ busy: 'starting' }) })),
+    true,
+  )
+  assert.equal(M.mayBeMoving(true, lost), true)
+  assert.equal(M.mayBeMoving(true, null), true)
+  assert.equal(
+    M.mayBeMoving(true, state({ link: 'searching', pad: null })),
+    true,
+  )
+  assert.equal(
+    M.mayBeMoving(true, state({ pad: pad({ busy: 'stopping' }) })),
+    true,
+  )
+  assert.equal(
+    M.mayBeMoving(true, state({ pad: pad({ belt: 'unknown' }) })),
+    true,
+  )
+  assert.equal(M.mayBeMoving(true, state()), false)
+  assert.equal(
+    M.mayBeMoving(true, state({ pad: pad({ belt: 'standby' }) })),
+    false,
+  )
+  assert.equal(M.mayBeMoving(false, lost), false)
+  assert.equal(M.mayBeMoving(false, state()), false)
+})
+
 test('canNudge is off in auto mode and without a pad', () => {
   assert.equal(M.canNudge(state()), true)
   assert.equal(M.canNudge(state({ pad: pad({ mode: 'auto' }) })), false)

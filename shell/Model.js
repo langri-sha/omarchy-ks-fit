@@ -124,6 +124,19 @@ function exercising(state) {
   )
 }
 
+// Whether the belt may still be moving once `state` arrives. A snapshot of it
+// moving sets this and only one of it connected and at rest clears it: a lost
+// link, a helper that went away or a new hello says nothing about a belt that
+// keeps going on its own.
+function mayBeMoving(previous, state) {
+  if (exercising(state)) return true
+  if (!connected(state)) return previous
+  var pad = state.pad
+  var resting =
+    (pad.belt === 'idle' || pad.belt === 'standby') && pad.busy == null
+  return resting ? false : previous
+}
+
 function canNudge(state) {
   return connected(state) && state.pad.mode !== 'auto'
 }

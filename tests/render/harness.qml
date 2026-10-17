@@ -461,11 +461,49 @@ ShellRoot {
       run: function(done) { grab([[card, "not-found"]], done) }
     },
     {
-      name: "demo",
+      name: "walk again",
       mockOnly: true,
       run: function(done) {
-        fakeShell.updateEntryInline(harness.pluginId, { demo: true })
+        service.reconnect()
         done()
+      }
+    },
+    {
+      name: "reconnected for the walk",
+      mockOnly: true,
+      until: function() { return service.connected },
+      run: function(done) {
+        service.start()
+        done()
+      }
+    },
+    {
+      name: "demo while walking",
+      mockOnly: true,
+      until: function() { return !!pad() && pad().belt === "running" },
+      run: function(done) {
+        fakeShell.updateEntryInline(harness.pluginId, { demo: true })
+        if (!service.demoBlocked) {
+          fail("a demo flip went through while the belt moved")
+          return
+        }
+        service.send({ cmd: "mock", linkDetail: "link-lost" })
+        done()
+      }
+    },
+    {
+      name: "link lost mid-walk",
+      mockOnly: true,
+      until: function() { return service.helperDemo || (!!snapshot() && snapshot().linkDetail === "link-lost") },
+      settle: 1500,
+      run: function(done) {
+        if (service.helperDemo || service.simulated) fail("a lost link let the demo flip through")
+        else if (!service.mayBeMoving) fail("a lost link cleared the moving latch")
+        else if (!service.demoBlocked) fail("a lost link dropped the demo notice")
+        else grab([[card, "link-lost-walking"]], function() {
+          service.reconnect()
+          done()
+        })
       }
     },
     {
