@@ -1,10 +1,13 @@
 //! The seam between the daemon and Bluetooth.
 
 pub mod bluez;
+mod rfkill;
 pub mod sim;
 
+use std::future;
+
 use tokio::sync::mpsc;
-use tokio::time::Duration;
+use tokio::time::{Duration, Instant, sleep_until};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdapterState {
@@ -96,6 +99,13 @@ pub struct Radio {
 }
 
 impl Radio {
+    /// The system adapter through bluetoothd. It never changes adapter power.
+    pub fn bluez() -> Radio {
+        let (radio, calls, events) = Radio::channel();
+        bluez::spawn(calls, events);
+        radio
+    }
+
     /// The simulated adapter and pad, and the hooks that drive it.
     pub fn simulated() -> (Radio, sim::Control) {
         let (radio, calls, events) = Radio::channel();
@@ -148,6 +158,13 @@ impl Radio {
         if self.calls.send(call).is_err() {
             log::error!("the Bluetooth task has stopped");
         }
+    }
+}
+
+async fn sleep_until_some(at: Option<Instant>) {
+    match at {
+        Some(at) => sleep_until(at).await,
+        None => future::pending().await,
     }
 }
 
