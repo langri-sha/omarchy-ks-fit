@@ -57,10 +57,12 @@ function backoffMs(attempt) {
   ]
 }
 
-// What a `fatal` from the launcher or the helper means for the panel.
+// What a `fatal` from the launcher or the helper means for the panel. A
+// held lock is a predecessor still shutting down: worth another try.
 function helperForFatal(code) {
   if (code === 'helper-missing') return 'missing'
   if (code === 'helper-outdated') return 'outdated'
+  if (code === 'already-running') return 'starting'
   return 'failed'
 }
 
