@@ -553,6 +553,19 @@ ShellRoot {
       until: function() { return service.connected && !!service.currentStats },
       settle: 400,
       run: function(done) { grab([[barStrip, "bar-demo"], [card, "stats-demo"]], done) }
+    },
+    {
+      name: "restart",
+      run: function(done) {
+        service.restartHelper()
+        if (service.send({ cmd: "sync" })) fail("a helper being restarted took a command")
+        else done()
+      }
+    },
+    {
+      name: "restarted",
+      until: function() { return service.helperStatus === "ready" && !!snapshot() },
+      run: function(done) { done() }
     }
   ])
 

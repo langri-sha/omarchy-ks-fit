@@ -82,8 +82,14 @@ QtObject {
     return decodeURIComponent(String(Qt.resolvedUrl(relative)).replace(/^file:\/\//, ""))
   }
 
+  // A helper being restarted or stopped has its stdin closed: nothing written
+  // to it now is read.
+  function canSend() {
+    return helper === "ready" && !restarting && helperProcess.running && helperProcess.stdinEnabled
+  }
+
   function send(command) {
-    if (helper !== "ready" || !helperProcess.running) return false
+    if (!canSend()) return false
     helperProcess.write(JSON.stringify(command) + "\n")
     return true
   }
@@ -129,7 +135,7 @@ QtObject {
   // already rules out; the daemon's own refusals arrive as `notice`, and a
   // stop it couldn't carry out raises the alarm.
   function ipcBelt(cmd) {
-    var plan = Model.ipcPlan(helper, helperProcess.running, state, cmd)
+    var plan = Model.ipcPlan(helper, canSend(), state, cmd)
     if (plan.send) beltCommand(cmd)
     else if (plan.stopFailed) raiseStopFailure()
     return plan.reply
