@@ -448,6 +448,14 @@ impl Store {
         )?)
     }
 
+    pub fn has_activity(&self) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT EXISTS (SELECT 1 FROM minutes)", [], |row| {
+                row.get(0)
+            })?)
+    }
+
     /// Adds `activity` to the UTC minute containing `at`.
     pub fn add_minute(&self, at: Timestamp, activity: &Activity) -> Result<()> {
         self.conn
@@ -929,6 +937,14 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_store_has_activity_once_a_minute_is_recorded() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(!store.has_activity().unwrap());
+        store.add_minute(at(6_000), &walk(10, 1.0)).unwrap();
+        assert!(store.has_activity().unwrap());
     }
 
     #[test]
