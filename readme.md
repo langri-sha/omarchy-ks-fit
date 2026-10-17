@@ -135,7 +135,8 @@ You're standing on the thing, so KS Fit refuses to surprise you:
 - Speed never fights the remote: when you change speed on the remote, KS Fit
   adopts it as the new target.
 - While the belt moves, the screen stays awake, so the panel's Stop isn't hidden
-  behind a lock screen.
+  behind a lock screen. After a lost link it stays awake until the pad is seen
+  standing still again.
 
 ## Update
 

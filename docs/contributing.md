@@ -68,9 +68,10 @@ cargo clippy --locked --all-targets -- -D warnings
   backoff. `missing`, `outdated` and `failed` wait for **Retry** or for
   `bin/ks-fit-build`, which calls `retryHelper` when it's done.
 - `shell/ServiceWindows.qml` holds an invisible layer surface whose
-  `IdleInhibitor` keeps the screen awake while the belt moves. It's enabled only
-  after the surface maps, because Hyprland ignores one that is already enabled.
-  `Service.qml` must not mention `PanelWindow`, or it would not load offscreen.
+  `IdleInhibitor` keeps the screen awake while the belt may be moving. It's
+  enabled only after the surface maps, because Hyprland ignores one that is
+  already enabled. `Service.qml` must not mention `PanelWindow`, or it would not
+  load offscreen.
 - `shell/PanelContent.qml` is the panel body and its cursor model, kept apart
   from `Panel.qml` so it renders offscreen. The helper banner sits above the
   stats or workout view and never replaces it: a kept helper may still be

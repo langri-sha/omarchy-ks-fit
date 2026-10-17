@@ -23,13 +23,14 @@ Item {
     WlrLayershell.namespace: "omarchy-ks-fit-guard"
   }
 
-  // Keeps the screen awake while the belt moves: a locked screen hides the
-  // panel's Stop from someone still walking. Hyprland ignores an inhibitor
-  // that is already enabled when the layer surface maps, so it is only
-  // enabled a moment after the window exists.
+  // Keeps the screen awake while the belt may be moving, a lost link
+  // included: a locked screen hides the panel's Stop from someone still
+  // walking. Hyprland ignores an inhibitor that is already enabled when the
+  // layer surface maps, so it is only enabled a moment after the window
+  // exists.
   IdleInhibitor {
     window: guard
-    enabled: root.guardReady && !!root.service && root.service.exercising
+    enabled: root.guardReady && !!root.service && root.service.mayBeMoving
   }
 
   Timer {
