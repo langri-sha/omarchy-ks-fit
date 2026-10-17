@@ -432,6 +432,11 @@ def main():
     if not args or args[0] != "daemon":
         sys.stderr.write("usage: mock-ks-fit daemon [--simulate]\n")
         return 2
+    held_lock = os.environ.get("KS_FIT_MOCK_HELD_LOCK")
+    if held_lock and os.path.exists(held_lock):
+        os.remove(held_lock)
+        emit({"type": "fatal", "code": "already-running", "message": "another ks-fit daemon is running"})
+        return 3
     mock = Mock("--simulate" in args)
     emit({"type": "hello", "version": manifest_version(), "simulated": mock.simulated})
     stdin = sys.stdin.fileno()
