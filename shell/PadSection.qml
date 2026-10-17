@@ -73,12 +73,19 @@ Column {
     }
   }
 
-  // Start only answers a cursor that arrow keys put there, never one a
-  // hover left under a resting pointer.
-  function activate(section, index, byArrows) {
+  function controlId(section, index) {
+    if (section !== "pad") return section + ":" + index
+    var action = actions[index]
+    return action ? "pad:" + action.id : ""
+  }
+
+  // `armed`: arrow keys put the cursor on this very control (PanelContent).
+  // Without it Start ignores the keyboard: a resting pointer's hover, or a
+  // row that changed under the cursor, must never start the belt.
+  function activate(section, index, armed) {
     if (section === "pad") {
       var action = actions[index]
-      if (action && action.id === "start" && !byArrows) return
+      if (action && action.id === "start" && !armed) return
       run(action)
     } else if (section === "scan") {
       choose(index)

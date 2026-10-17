@@ -299,6 +299,69 @@ ShellRoot {
       }
     },
     {
+      name: "arrow going nowhere after a hover",
+      run: function(done) {
+        var content = card.content
+        content.resetCursor()
+        content.hoverCursor("pad", 1, true)
+        content.moveCursor(0, 1)
+        if (!content.hasCursor("pad", 1)) {
+          fail("the pad row is no longer last, so this arrow moved")
+          return
+        }
+        content.activateCursor()
+        done()
+      }
+    },
+    {
+      name: "a stuck arrow left the belt alone",
+      settle: 1500,
+      run: function(done) {
+        if (service.exercising) fail("an arrow press that went nowhere armed Start")
+        service.disconnect()
+        done()
+      }
+    },
+    {
+      name: "arrows onto forget",
+      until: function() { return snapshot().link === "disconnected" && snapshot().linkDetail === "paused" },
+      run: function(done) {
+        var content = card.content
+        content.resetCursor()
+        for (var i = 0; i < 60 && !(content.cursorActive && content.focusSection === "pad"); i++)
+          content.moveCursor(0, 1)
+        content.moveCursor(1, 0)
+        if (content.controlAt(content.focusSection, content.selectedIndex) !== "pad:forget") {
+          fail("arrow keys never reached Forget")
+          return
+        }
+        service.reconnect()
+        done()
+      }
+    },
+    {
+      name: "start took forget's place",
+      until: function() { return service.connected },
+      settle: 300,
+      run: function(done) {
+        if (card.content.controlAt(card.content.focusSection, card.content.selectedIndex) !== "pad:start") {
+          fail("expected Start under the cursor once connected")
+          return
+        }
+        card.content.activateCursor()
+        done()
+      }
+    },
+    {
+      name: "a shifted row left the belt alone",
+      settle: 1500,
+      run: function(done) {
+        if (service.exercising) fail("Start answered an arrow press meant for Forget")
+        else if (!snapshot().device) fail("Forget ran after the row changed")
+        done()
+      }
+    },
+    {
       name: "arrows onto start",
       run: function(done) {
         var content = card.content
