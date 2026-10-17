@@ -46,3 +46,8 @@ for old in "$data/helpers"/*/; do
 done
 
 echo "Built $dest/ks-fit"
+
+# Let a running plugin pick the helper up without a Retry.
+if command -v omarchy-shell >/dev/null; then
+  omarchy-shell -q io.github.langri-sha.ks-fit retryHelper
+fi
