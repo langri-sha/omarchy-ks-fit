@@ -18,6 +18,7 @@ tmp=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/ks-fit-render.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
 mkdir -p "$tmp/config" "$tmp/bin" "$tmp/helper" "$tmp/data" "$tmp/state" "$tmp/xdg-config" "$tmp/cache"
+mkdir -m 700 "$tmp/runtime"
 ln -s "$shell_dir/Commons" "$tmp/config/Commons"
 ln -s "$shell_dir/Ui" "$tmp/config/Ui"
 cp "$here/harness.qml" "$tmp/config/shell.qml"
@@ -43,6 +44,7 @@ PATH="$tmp/bin:$PATH" \
   XDG_STATE_HOME="$tmp/state" \
   XDG_CONFIG_HOME="$tmp/xdg-config" \
   XDG_CACHE_HOME="$tmp/cache" \
+  XDG_RUNTIME_DIR="$tmp/runtime" \
   QT_QPA_PLATFORM=offscreen \
   QT_QUICK_BACKEND=software \
   timeout -k 2 120 qs -p "$tmp/config/shell.qml" --no-color 2>&1 |
