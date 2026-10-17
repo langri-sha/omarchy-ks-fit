@@ -80,7 +80,8 @@ QtObject {
   function forget() { return send({ cmd: "forget" }) }
   function start() { return send({ cmd: "start" }) }
   function stop() { return send({ cmd: "stop" }) }
-  function toggleBelt() { return exercising ? stop() : start() }
+  // The daemon decides from the pad's latest status, not from this snapshot.
+  function toggleBelt() { return send({ cmd: "toggle" }) }
 
   function connectTo(address, name) {
     var command = { cmd: "connect", address: String(address) }
