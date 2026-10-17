@@ -66,6 +66,9 @@ pub struct Tracker {
     running: bool,
     session: Option<Session>,
     last: Option<Session>,
+    /// A frame whose time counter dropped, waiting for the next frame from
+    /// the same pad to confirm a reset.
+    unconfirmed: Option<(String, Counters)>,
     today: Today,
     day: Range<Timestamp>,
 }
@@ -93,6 +96,7 @@ impl Tracker {
             running: false,
             session: None,
             last,
+            unconfirmed: None,
             today,
             day,
         })
@@ -138,7 +142,17 @@ impl Tracker {
         self.roll_over(now)?;
         self.running = sample.running;
         let reading = sample.counters();
-        let delta = credit(device, self.store.baseline(device)?, reading, now);
+        let unconfirmed = self
+            .unconfirmed
+            .take()
+            .filter(|(pad, _)| pad == device)
+            .map(|(_, reading)| reading);
+        let baseline = self.store.baseline(device)?;
+        let Some(delta) = credit(device, baseline, unconfirmed, reading, now) else {
+            log::info!("{device}: the time counter went back; a reset needs one more frame");
+            self.unconfirmed = Some((device.to_owned(), reading));
+            return Ok(());
+        };
         let kcal = energy(delta, sample.speed_kmh(), self.weight_kg);
         let shares = shares(delta, kcal, now)?;
         let mut next = self.advance(delta, &shares, sample, now)?;
@@ -197,6 +211,7 @@ impl Tracker {
 
     pub fn on_link_lost(&mut self) -> Result<()> {
         self.running = false;
+        self.unconfirmed = None;
         self.close()
     }
 
@@ -301,33 +316,46 @@ fn clamp_weight(kg: f64) -> f64 {
 }
 
 /// What to credit for `reading`: nothing on a device's first frame or when
-/// no pad could have advanced that far since `baseline`.
-fn credit(device: &str, baseline: Option<Baseline>, reading: Counters, now: Timestamp) -> Counters {
+/// no pad could have advanced that far since `baseline`, and `None` while a
+/// reset is unconfirmed.
+fn credit(
+    device: &str,
+    baseline: Option<Baseline>,
+    unconfirmed: Option<Counters>,
+    reading: Counters,
+    now: Timestamp,
+) -> Option<Counters> {
     let Some(baseline) = baseline else {
-        return Counters::default();
+        return Some(Counters::default());
     };
-    let delta = delta(baseline.counters, reading);
+    let delta = delta(baseline.counters, unconfirmed, reading)?;
     let elapsed = now.duration_since(baseline.seen_at);
     if plausible(delta, elapsed) {
-        delta
+        Some(delta)
     } else {
         log::warn!("{device}: ignoring a counter advance of {delta:?} within {elapsed:#}");
-        Counters::default()
+        Some(Counters::default())
     }
 }
 
-/// What the counters advanced by since `base`: everything since zero when
-/// the time counter dropped, as the pad has reset, while distance or steps
-/// dropping on their own re-base without credit.
-fn delta(base: Counters, reading: Counters) -> Counters {
+/// What the counters advanced by since `base`. A dropped time counter is a
+/// pad reset, crediting everything since zero, once a second frame in a row
+/// shows it without going back on the `unconfirmed` first; until then it is
+/// `None`. Distance or steps dropping on their own re-base without credit.
+fn delta(base: Counters, unconfirmed: Option<Counters>, reading: Counters) -> Option<Counters> {
     if reading.time_s < base.time_s {
-        return reading;
+        let confirmed = unconfirmed.is_some_and(|first| {
+            reading.time_s >= first.time_s
+                && reading.dist_10m >= first.dist_10m
+                && reading.steps >= first.steps
+        });
+        return confirmed.then_some(reading);
     }
-    Counters {
+    Some(Counters {
         time_s: reading.time_s - base.time_s,
         dist_10m: reading.dist_10m.saturating_sub(base.dist_10m),
         steps: reading.steps.saturating_sub(base.steps),
-    }
+    })
 }
 
 /// Whether the belt could have moved by `delta` within `elapsed`. Distance
@@ -523,16 +551,86 @@ mod tests {
     }
 
     #[test]
-    fn a_dropped_time_counter_means_the_pad_reset() {
+    fn a_dropped_time_counter_is_a_reset_once_the_next_frame_confirms_it() {
         let mut tracker = tracker_at(at("10:00:00"));
         feed(
             &mut tracker,
             &[
                 (at("10:00:00"), stopped(1_000, 80, 1_500)),
-                (at("10:00:05"), walking(4, 1, 8)),
+                (at("10:00:05"), walking(3, 0, 6)),
             ],
         );
-        assert_eq!(integers(tracker.session().unwrap().activity), (4, 8, 10));
+        assert_eq!(tracker.session(), None);
+        let baseline = tracker.store().baseline(PAD).unwrap().unwrap();
+        assert_eq!(
+            (baseline.counters, baseline.seen_at),
+            (stopped(1_000, 80, 1_500).counters(), at("10:00:00"))
+        );
+        feed(&mut tracker, &[(at("10:00:06"), walking(4, 1, 8))]);
+        assert_eq!(integers(tracker.today().activity), (4, 8, 10));
+    }
+
+    #[test]
+    fn a_single_frame_with_a_dropped_time_counter_credits_nothing() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(3, 0, 6)),
+                (at("10:00:02"), walking(1_001, 80, 1_502)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (1, 2, 0));
+    }
+
+    #[test]
+    fn a_reset_frame_followed_by_lower_counters_starts_over() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(30, 3, 60)),
+                (at("10:00:02"), walking(3, 0, 6)),
+            ],
+        );
+        assert_eq!(tracker.session(), None);
+        feed(&mut tracker, &[(at("10:00:03"), walking(4, 1, 8))]);
+        assert_eq!(integers(tracker.today().activity), (4, 8, 10));
+    }
+
+    #[test]
+    fn a_reset_frame_held_when_the_link_drops_is_not_confirmed_after_it() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), stopped(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(3, 0, 6)),
+            ],
+        );
+        tracker.on_link_lost().unwrap();
+        feed(&mut tracker, &[(at("10:05:00"), walking(4, 1, 8))]);
+        assert_eq!(tracker.session(), None);
+        feed(&mut tracker, &[(at("10:05:01"), walking(5, 1, 10))]);
+        assert_eq!(integers(tracker.today().activity), (5, 10, 10));
+    }
+
+    #[test]
+    fn a_corrupt_spike_credits_nothing_and_the_real_frames_re_base() {
+        let mut tracker = tracker_at(at("10:00:00"));
+        feed(
+            &mut tracker,
+            &[
+                (at("10:00:00"), walking(1_000, 80, 1_500)),
+                (at("10:00:01"), walking(9_000, 80, 1_502)),
+                (at("10:00:02"), walking(1_002, 80, 1_504)),
+                (at("10:00:03"), walking(1_003, 80, 1_506)),
+                (at("10:00:04"), walking(1_004, 80, 1_508)),
+            ],
+        );
+        assert_eq!(integers(tracker.today().activity), (1, 2, 0));
     }
 
     #[test]
