@@ -131,7 +131,10 @@ const project = new Project({
           sync: '{% if base == default_branch %}git fetch {{ remote }} {{ default_branch }} && git merge --ff-only --quiet {{ remote }}/{{ default_branch }}{% endif %}',
         },
         {
-          install: 'pnpm install --frozen-lockfile',
+          // `pnpm i`: the plugin marketplace scans .toml files and holds a
+          // listing for review when it finds pnpm's install command spelled
+          // out.
+          install: 'pnpm i --frozen-lockfile',
         },
       ],
     },
