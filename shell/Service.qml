@@ -351,6 +351,13 @@ QtObject {
     }
   }
 
+  // Offscreen tooling has no PanelWindow backend, so the window lives in a
+  // file of its own and simply fails to load there.
+  readonly property Loader windows: Loader {
+    source: "ServiceWindows.qml"
+    onLoaded: item.service = root
+  }
+
   readonly property Timer restartTimer: Timer {
     onTriggered: root.startHelper()
   }
