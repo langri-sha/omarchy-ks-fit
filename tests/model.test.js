@@ -114,10 +114,10 @@ test('backoffMs steps up and stays at 30 s', () => {
   )
 })
 
-test('helperForFatal tells a missing build from a broken helper', () => {
+test('helperForFatal tells a missing build and a held lock from a broken helper', () => {
   assert.equal(M.helperForFatal('helper-missing'), 'missing')
   assert.equal(M.helperForFatal('helper-outdated'), 'outdated')
-  assert.equal(M.helperForFatal('already-running'), 'failed')
+  assert.equal(M.helperForFatal('already-running'), 'starting')
   assert.equal(M.helperForFatal('data-dir'), 'failed')
   assert.equal(M.helperForFatal(undefined), 'failed')
 })

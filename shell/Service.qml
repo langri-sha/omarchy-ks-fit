@@ -57,6 +57,7 @@ QtObject {
 
   property bool destroying: false
   property bool restarting: false
+  property bool lockHeld: false
   property int attempts: 0
   property var exits: []
   property string lastStderr: ""
@@ -201,7 +202,10 @@ QtObject {
   }
 
   function handleFatal(message) {
-    helper = Model.helperForFatal(message.code)
+    var next = Model.helperForFatal(message.code)
+    lockHeld = next === "starting"
+    if (lockHeld) return
+    helper = next
     if (helper === "failed") helperError = String(message.message || message.code || "The helper stopped")
   }
 
@@ -220,6 +224,7 @@ QtObject {
   function startHelper() {
     if (destroying || helperProcess.running) return
     lastStderr = ""
+    lockHeld = false
     helperProcess.stdinEnabled = true
     helperProcess.running = true
   }
@@ -253,6 +258,14 @@ QtObject {
       return
     }
     if (stale || helper === "missing" || helper === "outdated" || helper === "failed") return
+    helper = "starting"
+    attempts++
+    restartTimer.interval = Model.backoffMs(attempts)
+    if (lockHeld) {
+      lockHeld = false
+      restartTimer.restart()
+      return
+    }
     var now = Date.now()
     var recent = exits.filter(function(t) { return now - t < 60000 })
     recent.push(now)
@@ -262,9 +275,6 @@ QtObject {
       helperError = lastStderr || "The helper keeps exiting"
       return
     }
-    helper = "starting"
-    attempts++
-    restartTimer.interval = Model.backoffMs(attempts)
     restartTimer.restart()
   }
 
