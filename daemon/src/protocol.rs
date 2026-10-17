@@ -47,7 +47,7 @@ impl Command {
 }
 
 /// The sum of every byte between the start byte and the checksum byte.
-fn checksum(body: &[u8]) -> u8 {
+pub(crate) fn checksum(body: &[u8]) -> u8 {
     body.iter().fold(0, |sum, byte| sum.wrapping_add(*byte))
 }
 
