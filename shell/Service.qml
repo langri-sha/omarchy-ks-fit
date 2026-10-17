@@ -183,7 +183,12 @@ QtObject {
     }
   }
 
+  // A new helper may be the simulator where the real one ran, or the other
+  // way round: nothing cached from before carries over.
   function handleHello(message) {
+    state = null
+    statsCache = ({})
+    statsRevision++
     helperVersion = String(message.version || "")
     simulated = message.simulated === true
     if (helperVersion !== Version.version) {
