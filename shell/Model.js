@@ -406,6 +406,23 @@ function niceMax(value) {
   return 10 * magnitude
 }
 
+// Each column's value with its share of the chart's height. Values and scale
+// come from one pass: a delegate reading a separately bound scale can see it
+// before it catches up and draw far past the top.
+function scaleColumns(values) {
+  var list = values || []
+  var peak = 0
+  for (var i = 0; i < list.length; i++)
+    peak = Math.max(peak, Number(list[i]) || 0)
+  var top = niceMax(peak)
+  var columns = []
+  for (var j = 0; j < list.length; j++) {
+    var value = Number(list[j]) || 0
+    columns.push({ value: value, fraction: value > 0 ? value / top : 0 })
+  }
+  return columns
+}
+
 // "2026-10-04" as numbers. Never `new Date(text)`: that reads UTC midnight.
 function parseDate(text) {
   var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(text || ''))

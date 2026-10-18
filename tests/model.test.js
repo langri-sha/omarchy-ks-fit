@@ -553,6 +553,35 @@ test('niceMax rounds up to 1, 2, 2.5 or 5 times a power of ten', () => {
   )
 })
 
+test('scaleColumns gives each value its share of the nice maximum', () => {
+  assert.deepEqual(plain(M.scaleColumns([0, 500, 1218, 2000])), [
+    { value: 0, fraction: 0 },
+    { value: 500, fraction: 0.25 },
+    { value: 1218, fraction: 0.609 },
+    { value: 2000, fraction: 1 },
+  ])
+})
+
+test('scaleColumns keeps every fraction within the chart', () => {
+  const fractions = M.scaleColumns([62.6, 3, 101]).map((c) => c.fraction)
+  assert.ok(fractions.every((f) => f >= 0 && f <= 1))
+  assert.equal(Math.max(...fractions), 101 / 200)
+})
+
+test('scaleColumns flattens empty, negative and unreadable values', () => {
+  assert.deepEqual(plain(M.scaleColumns([0, 0])), [
+    { value: 0, fraction: 0 },
+    { value: 0, fraction: 0 },
+  ])
+  assert.deepEqual(plain(M.scaleColumns([-3, 'x', null, 4])), [
+    { value: -3, fraction: 0 },
+    { value: 0, fraction: 0 },
+    { value: 0, fraction: 0 },
+    { value: 4, fraction: 0.8 },
+  ])
+  assert.deepEqual(plain(M.scaleColumns(undefined)), [])
+})
+
 test('parseDate reads the parts without going through UTC', () => {
   assert.deepEqual(plain(M.parseDate('2026-10-04')), {
     year: 2026,
