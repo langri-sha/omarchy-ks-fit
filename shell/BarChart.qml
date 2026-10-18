@@ -21,11 +21,7 @@ Item {
 
   signal hovered(int index, bool isHovered)
 
-  readonly property real scaleTop: {
-    var peak = 0
-    for (var i = 0; i < values.length; i++) peak = Math.max(peak, Number(values[i]) || 0)
-    return Model.niceMax(peak)
-  }
+  readonly property var scaled: Model.scaleColumns(values)
   readonly property real labelHeight: Style.font.caption + Style.space(6)
   readonly property real gap: values.length > 12 ? Style.space(2) : Style.space(6)
   readonly property real hairline: Math.max(1, Style.space(1))
@@ -51,23 +47,23 @@ Item {
       spacing: chart.gap
 
       Repeater {
-        model: chart.values
+        model: chart.scaled
 
         Item {
           id: column
           required property var modelData
           required property int index
-          readonly property real value: Number(modelData) || 0
+          readonly property real value: modelData.value
           readonly property bool current: index === chart.currentIndex
           readonly property bool selected: index === chart.selectedIndex
 
-          width: (columns.width - columns.spacing * Math.max(0, chart.values.length - 1)) / Math.max(1, chart.values.length)
+          width: (columns.width - columns.spacing * Math.max(0, chart.scaled.length - 1)) / Math.max(1, chart.scaled.length)
           height: columns.height
 
           Rectangle {
             anchors.bottom: parent.bottom
             width: parent.width
-            height: column.value > 0 ? Math.max(Style.space(2), parent.height * column.value / chart.scaleTop) : chart.hairline
+            height: column.value > 0 ? Math.max(Style.space(2), parent.height * column.modelData.fraction) : chart.hairline
             radius: Style.cornerRadius > 0 ? Math.min(Style.space(2), width / 2) : 0
             color: column.current ? Style.selectedStateColor(chart.foreground, chart.accent)
               : Qt.rgba(chart.foreground.r, chart.foreground.g, chart.foreground.b,
