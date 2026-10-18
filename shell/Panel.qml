@@ -70,16 +70,22 @@ Panel {
 
         Flickable {
           id: flick
+          // At fractional scales a clip edge flush with the content rounds
+          // onto the controls' outer borders, so it sits just outside.
+          readonly property int bleed: 2
           anchors.fill: parent
+          anchors.margins: -bleed
           contentWidth: width
-          contentHeight: content.implicitHeight
+          contentHeight: content.implicitHeight + bleed * 2
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           interactive: contentHeight > height
 
           PanelContent {
             id: content
-            width: flick.width
+            x: flick.bleed
+            y: flick.bleed
+            width: flick.width - flick.bleed * 2
             bar: root.bar
             service: root.service
           }
