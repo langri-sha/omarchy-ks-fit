@@ -29,9 +29,9 @@
     "worktrunk:show": "pnpm exec projen worktrunk:show"
   },
   "devDependencies": {
-    "@langri-sha/lint-staged": "0.9.9",
-    "@langri-sha/prettier": "0.4.10",
-    "@langri-sha/projen-project": "0.31.3",
+    "@langri-sha/lint-staged": "0.9.11",
+    "@langri-sha/prettier": "0.4.11",
+    "@langri-sha/projen-project": "0.41.0",
     "husky": "9.1.7",
     "lint-staged": "17.6.0",
     "prettier": "3.9.9",

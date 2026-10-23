@@ -19,7 +19,7 @@ const project = new Project({
     type: 'module',
 
     entrypoint: '',
-    devDeps: ['@langri-sha/lint-staged@0.9.9', '@langri-sha/prettier@0.4.10'],
+    devDeps: ['@langri-sha/lint-staged@0.9.11', '@langri-sha/prettier@0.4.11'],
   },
   codeowners: {
     '*': '@langri-sha',
