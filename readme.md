@@ -10,6 +10,8 @@ A small Rust helper owns the Bluetooth link to the pad and keeps the walks in a
 local SQLite database. The plugin's QML shows what the helper reports and sends
 it your commands.
 
+KS Fit is an independent project, not affiliated with or endorsed by KingSmith.
+
 ## Features
 
 - **Bar:** a walking figure, lit while connected; during a walk the time and
