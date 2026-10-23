@@ -62,7 +62,7 @@ Item {
   }
 
   function sectionAt(list, name) {
-    for (var i = 0; i < list.length; i++) if (list[i].name === name) return i
+    for (let i = 0; i < list.length; i++) if (list[i].name === name) return i
     return -1
   }
 
@@ -128,7 +128,7 @@ Item {
     var section = list[at]
     var cols = Math.max(1, section.columns)
     if (dx !== 0) {
-      var next = selectedIndex + dx
+      let next = selectedIndex + dx
       if (next >= 0 && next < section.count && Math.floor(next / cols) === Math.floor(selectedIndex / cols)) selectedIndex = next
       return
     }
