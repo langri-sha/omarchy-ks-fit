@@ -66,7 +66,7 @@ Column {
 
   function choose(index) {
     if (index < scan.rows.length) {
-      var device = scan.rows[index]
+      let device = scan.rows[index]
       service.connectTo(device.address, device.name)
     } else {
       showAll = !showAll
@@ -84,7 +84,7 @@ Column {
   // row that changed under the cursor, must never start the belt.
   function activate(section, index, armed) {
     if (section === "pad") {
-      var action = actions[index]
+      let action = actions[index]
       if (action && action.id === "start" && !armed) return
       run(action)
     } else if (section === "scan") {
@@ -166,7 +166,7 @@ Column {
     readonly property real compact: Style.space(40)
     readonly property int labelled: {
       var n = 0
-      for (var i = 0; i < root.actions.length; i++) if (root.actions[i].label) n++
+      for (let i = 0; i < root.actions.length; i++) if (root.actions[i].label) n++
       return Math.max(1, n)
     }
     readonly property real wide: (width - spacing * (root.actions.length - 1) - compact * (root.actions.length - labelled)) / labelled
