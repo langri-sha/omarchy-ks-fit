@@ -10,7 +10,8 @@ jobs:
   check:
     permissions:
       contents: write
-    uses: langri-sha/github/.github/workflows/check.yml@v0.23.0
+      id-token: write
+    uses: langri-sha/github/.github/workflows/check.yml@v0.31.0
     with:
       prettier: true
       projen: true
