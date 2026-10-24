@@ -28,6 +28,9 @@ node_modules/
 !/rust-toolchain.toml
 !/rustfmt.toml
 /target/
+!/.claude
+/.claude/settings.local.json
+!/.claude/settings.json
 !/CODEOWNERS
 !/.editorconfig
 !/license

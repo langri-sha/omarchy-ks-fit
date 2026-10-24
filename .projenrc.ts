@@ -76,6 +76,9 @@ const project = new Project({
       components: ['clippy', 'rustfmt'],
     },
   },
+  claude: {
+    settings: { attribution: { commit: '', pr: '', sessionUrl: false } },
+  },
   codeowners: {
     '*': '@langri-sha',
   },
