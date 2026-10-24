@@ -18,7 +18,7 @@ const project = new Project({
     homepage: 'https://github.com/langri-sha/omarchy-ks-fit#readme',
     license: 'MIT',
     licensed: true,
-    minNodeVersion: '24.16.0',
+    minNodeVersion: '24.22.1',
     repository: 'langri-sha/omarchy-ks-fit',
     type: 'module',
 
