@@ -104,25 +104,7 @@ const project = new Project({
     filename: 'readme.md',
   },
   renovate: {
-    packageRules: [
-      {
-        description: 'Update our own packages together',
-        groupName: 'langri-sha projen toolchain',
-        groupSlug: 'langri-sha-projen',
-        matchPackageNames: ['@langri-sha/**'],
-      },
-      {
-        description: 'Install our own packages without waiting them out',
-        matchPackageNames: ['@langri-sha/**'],
-        minimumReleaseAge: null,
-      },
-      {
-        description:
-          'Install our own GitHub Actions and Terraform modules without waiting them out',
-        matchPackageNames: ['langri-sha/**'],
-        minimumReleaseAge: null,
-      },
-    ],
+    extends: ['github>langri-sha/renovate-config'],
   },
   worktrunk: {
     config: {
