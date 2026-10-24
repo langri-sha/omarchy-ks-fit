@@ -25,7 +25,7 @@
 /pnpm-lock.yaml linguist-generated
 /pnpm-workspace.yaml linguist-generated
 /prettier.config.js linguist-generated
-/renovate.json5 linguist-generated
+/renovate.json5 linguist-generated linguist-language=JSON-with-Comments
 /rust-toolchain.toml linguist-generated
 /rustfmt.toml linguist-generated
 /shell/Version.js linguist-generated
