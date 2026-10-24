@@ -97,7 +97,7 @@ const project = new Project({
   },
   lintSynthesized: {},
   pnpmWorkspace: {
-    minimumReleaseAgeExclude: ['@langri-sha/*'],
+    minimumReleaseAgeExclude: ['@langri-sha/*', ...Project.presetPackages],
   },
   prettier: {},
   readme: {
