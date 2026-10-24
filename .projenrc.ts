@@ -80,9 +80,6 @@ const project = new Project({
     '*': '@langri-sha',
   },
   editorConfig: {
-    // Listed first so the preset's defaults land here rather than after the
-    // Rust section, where they would override its indent_size.
-    '*': {},
     '*.rs': {
       indent_size: 4,
     },
