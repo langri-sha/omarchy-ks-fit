@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup PNPM
-        uses: langri-sha/github/actions/pnpm@v0.23.0
+        uses: langri-sha/github/actions/pnpm@v0.31.0
 
       - name: Test
         run: node --test 'tests/**/*.test.js'
