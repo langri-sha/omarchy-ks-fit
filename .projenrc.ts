@@ -87,6 +87,7 @@ const project = new Project({
       indent_size: 4,
     },
   },
+  githubTemplates: {},
   husky: {
     'pre-commit': 'lint-staged',
   },
