@@ -4,7 +4,7 @@ Control a KingSmith WalkingPad from the [Omarchy](https://omarchy.org) bar and
 chart your steps and calories: start and stop the belt, change its speed, follow
 the walk in the bar, and look back over days, weeks, months and years.
 
-![The KS Fit panel: this week's steps, and a walk in progress](preview.png)
+![KS Fit: the bar during a walk, and the panel's month of steps](preview.png)
 
 A small Rust helper owns the Bluetooth link to the pad and keeps the walks in a
 local SQLite database. The plugin's QML shows what the helper reports and sends
