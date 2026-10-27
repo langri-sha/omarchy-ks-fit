@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 ShellRoot {
@@ -59,10 +60,10 @@ ShellRoot {
 
   QtObject {
     id: fakeBar
-    readonly property color foreground: Color.bar.text
-    readonly property color barForeground: Color.bar.text
-    readonly property color background: Color.bar.background
-    readonly property color urgent: Color.bar.active
+    readonly property color foreground: Commons.Color.bar.text
+    readonly property color barForeground: Commons.Color.bar.text
+    readonly property color background: Commons.Color.bar.background
+    readonly property color urgent: Commons.Color.bar.active
     readonly property string fontFamily: Style.font.family
     readonly property string position: "top"
     readonly property bool vertical: false
@@ -99,7 +100,7 @@ ShellRoot {
   FloatingWindow {
     implicitWidth: 1000
     implicitHeight: 1400
-    color: Color.background
+    color: Commons.Color.background
 
     Column {
       x: 16
@@ -110,7 +111,7 @@ ShellRoot {
         id: barStrip
         width: 440
         height: Style.bar.sizeHorizontal
-        color: Color.bar.background
+        color: Commons.Color.bar.background
 
         Row {
           anchors.centerIn: parent
@@ -142,8 +143,8 @@ ShellRoot {
 
         width: Style.space(400) + contentLeftInset + contentRightInset
         height: loader.item ? loader.item.implicitHeight + contentTopInset + contentBottomInset : 100
-        color: Color.popups.background
-        borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
+        color: Commons.Color.popups.background
+        borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
         padding: Style.spacing.popupPadding
         radius: Style.cornerRadius
 
