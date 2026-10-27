@@ -54,6 +54,10 @@ cargo clippy --locked --all-targets -- -D warnings
   helper instead, in demo mode and with its data and `XDG_RUNTIME_DIR` under a
   temp dir, so its lock can't collide with a live shell's; the steps that need
   the mock's `{"cmd":"mock",…}` controls are skipped.
+- The readme's screenshots in `docs/screenshots/` are renders from
+  `QT_SCALE_FACTOR=2 pnpm plugin:render`, in the theme that's current. The
+  mock's history only has steps between 08:00 and 19:00, so render in the
+  afternoon, or set `TZ` to a zone where it's afternoon.
 
 ## How it fits together
 

@@ -25,6 +25,13 @@ KS Fit is an independent project, not affiliated with or endorsed by KingSmith.
 - **Demo mode** runs against a simulated pad with made-up history, for trying
   the plugin without a treadmill.
 
+<img src="docs/screenshots/bar.png" width="440" alt="The bar during a walk: the walking figure, then the session's time and steps, 12:35 · 1,208">
+
+<p>
+  <img src="docs/screenshots/year-calories.png" width="400" alt="The year view in calories, estimated for 70 kg, with October highlighted">
+  <img src="docs/screenshots/scan.png" width="400" alt="Scanning for pads, with two WalkingPads found nearby">
+</p>
+
 ## Supported hardware
 
 WalkingPads that speak KingSmith's older `FE00` Bluetooth service, which other
