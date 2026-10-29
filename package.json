@@ -35,7 +35,7 @@
   "devDependencies": {
     "@langri-sha/lint-staged": "0.9.11",
     "@langri-sha/prettier": "0.4.11",
-    "@langri-sha/projen-project": "0.43.0",
+    "@langri-sha/projen-project": "0.44.2",
     "husky": "9.1.7",
     "lint-staged": "17.6.0",
     "prettier": "3.9.9",
