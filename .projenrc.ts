@@ -24,7 +24,6 @@ const project = new Project({
 
     autoDetectBin: false,
     entrypoint: '',
-    devDeps: ['@langri-sha/lint-staged@0.9.11', '@langri-sha/prettier@0.4.11'],
   },
   cargo: {
     workspace: {
