@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup PNPM
-        uses: langri-sha/github/actions/pnpm@v0.33.1
+        uses: langri-sha/github/actions/pnpm@v0.34.0
 
       - name: Test
         run: node --test 'tests/**/*.test.js'
