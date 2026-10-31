@@ -41,7 +41,7 @@ const project = new Project({
         'futures-util': '0.3.34',
         jiff: '0.2.37',
         log: '0.4.34',
-        rusqlite: { version: '0.40.2', features: ['bundled'] },
+        rusqlite: { version: '0.41.0', features: ['bundled'] },
         serde: { version: '1.0.229', features: ['derive'] },
         serde_json: '1.0.151',
         thiserror: '2.0.21',
