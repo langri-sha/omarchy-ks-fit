@@ -26,7 +26,7 @@ members = [ "daemon" ]
     features = [ "bluetoothd" ]
 
     [workspace.dependencies.rusqlite]
-    version = "0.40.2"
+    version = "0.41.0"
     features = [ "bundled" ]
 
     [workspace.dependencies.serde]
