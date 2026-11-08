@@ -199,7 +199,7 @@ versionFile.addLine('')
 project.prettier?.ignore.addPatterns('/shell/Model.js', '/shell/Version.js')
 
 project.package?.addField('private', true)
-project.package?.addField('packageManager', 'pnpm@12.17.0')
+project.package?.addField('packageManager', 'pnpm@12.18.0')
 project.package?.addEngine('pnpm', '>= 11.0.0')
 
 project.package?.setScript('format', 'prettier --write .')
