@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -16,7 +17,7 @@ BarWidget {
   readonly property bool exercising: ready && service.exercising
   readonly property string label: vertical || !service ? "" : service.barText
   readonly property bool demo: !vertical && ready && service.simulated
-  readonly property color activeColor: bar ? bar.urgent : Color.accent
+  readonly property color activeColor: bar ? bar.urgent : Commons.Color.accent
 
   // Shape the bar looks for to route `omarchy-shell shell toggle <id>` and
   // Tab switching to the nested panel.

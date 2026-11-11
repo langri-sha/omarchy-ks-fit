@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // Column chart from Rectangles, scaled to a nice maximum like the agents
@@ -15,8 +16,8 @@ Item {
   property int currentIndex: -1
   property int selectedIndex: -1
   property string emptyText: ""
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
 
   signal hovered(int index, bool isHovered)
