@@ -16,7 +16,7 @@ members = [ "daemon" ]
   [workspace.dependencies]
   anyhow = "1.0.104"
   futures-util = "0.3.34"
-  jiff = "0.2.37"
+  jiff = "1.0.0"
   log = "0.4.34"
   serde_json = "1.0.151"
   thiserror = "2.0.21"
