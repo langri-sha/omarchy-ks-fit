@@ -39,7 +39,7 @@ const project = new Project({
         anyhow: '1.0.104',
         bluer: { version: '0.17.4', features: ['bluetoothd'] },
         'futures-util': '0.3.34',
-        jiff: '0.2.37',
+        jiff: '1.0.0',
         log: '0.4.34',
         rusqlite: { version: '0.43.0', features: ['bundled'] },
         serde: { version: '1.0.229', features: ['derive'] },
