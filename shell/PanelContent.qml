@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -13,7 +14,7 @@ Item {
   property var bar: null
   property var service: null
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
@@ -261,7 +262,7 @@ Item {
       visible: text !== ""
       width: parent.width
       text: root.service ? root.service.notice : ""
-      color: alarm ? Color.urgent : root.dim
+      color: alarm ? Commons.Color.urgent : root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
       font.bold: alarm

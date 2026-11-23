@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -12,7 +13,7 @@ BorderSurface {
   id: root
 
   property var service: null
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property string fontFamily: Style.font.family
   property int cursorIndex: -1
 
@@ -73,8 +74,8 @@ BorderSurface {
   }
 
   implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
-  color: status === "starting" ? "transparent" : Style.hoverFillFor(foreground, Color.accent)
-  borderSpec: status === "starting" ? Border.none() : Border.controlSpec("normal", foreground, Color.accent)
+  color: status === "starting" ? "transparent" : Style.hoverFillFor(foreground, Commons.Color.accent)
+  borderSpec: status === "starting" ? Border.none() : Border.controlSpec("normal", foreground, Commons.Color.accent)
   radius: Style.cornerRadius
   padding: status === "starting" ? 0 : Style.spacing.xxl
 
