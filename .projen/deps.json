@@ -22,7 +22,7 @@
     },
     {
       "name": "lint-staged",
-      "version": "17.6.0",
+      "version": "17.6.2",
       "type": "build"
     },
     {
